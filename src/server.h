@@ -32,7 +32,6 @@
 
 #include "fmacros.h"
 #include "config.h"
-#include "solarisfixes.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,7 +44,6 @@
 #include <pthread.h>
 #include <syslog.h>
 #include <netinet/in.h>
-#include <lua.h>
 #include <signal.h>
 
 typedef long long mstime_t; /* millisecond time type. */
@@ -58,17 +56,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #include "anet.h"    /* Networking the easy way */
 #include "ziplist.h" /* Compact list data structure */
 #include "intset.h"  /* Compact integer set structure */
-#include "version.h" /* Version macro */
 #include "util.h"    /* Misc functions useful in many places */
-#include "latency.h" /* Latency monitor API */
-#include "sparkline.h" /* ASCII graphs API */
 #include "quicklist.h"
-
-/* Following includes allow test functions to be called from Redis main() */
-#include "zipmap.h"
-#include "sha1.h"
-#include "endianconv.h"
-#include "crc64.h"
 
 /* Error codes */
 #define C_OK                    0
@@ -950,7 +939,6 @@ struct redisServer {
     int cluster_require_full_coverage; /* If true, put the cluster down if
                                           there is at least an uncovered slot.*/
     /* Scripting */
-    lua_State *lua; /* The Lua interpreter. We use just one for all clients */
     client *lua_client;   /* The "fake client" to query Redis from Lua */
     client *lua_caller;   /* The client running EVAL right now, or NULL */
     dict *lua_scripts;         /* A dictionary of SHA1 -> Lua scripts */
@@ -1257,9 +1245,6 @@ int replicationSetupSlaveForFullResync(client *slave, long long offset);
 void startLoading(FILE *fp);
 void loadingProgress(off_t pos);
 void stopLoading(void);
-
-/* RDB persistence */
-#include "rdb.h"
 
 /* AOF persistence */
 void flushAppendOnlyFile(int force);

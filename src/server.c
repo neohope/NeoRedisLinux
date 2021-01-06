@@ -28,10 +28,6 @@
  */
 
 #include "server.h"
-#include "cluster.h"
-#include "slowlog.h"
-#include "bio.h"
-#include "latency.h"
 
 #include <time.h>
 #include <signal.h>
@@ -275,7 +271,6 @@ struct redisCommand redisCommandTable[] = {
     {"client",clientCommand,-2,"as",0,NULL,0,0,0,0,0},
     {"eval",evalCommand,-3,"s",0,evalGetKeys,0,0,0,0,0},
     {"evalsha",evalShaCommand,-3,"s",0,evalGetKeys,0,0,0,0,0},
-    {"slowlog",slowlogCommand,-2,"a",0,NULL,0,0,0,0,0},
     {"script",scriptCommand,-2,"s",0,NULL,0,0,0,0,0},
     {"time",timeCommand,1,"RF",0,NULL,0,0,0,0,0},
     {"bitop",bitopCommand,-4,"wm",0,NULL,2,-1,1,0,0},
@@ -2009,9 +2004,6 @@ void initServer(void) {
     if (server.cluster_enabled) clusterInit();
     replicationScriptCacheInit();
     scriptingInit(1);
-    slowlogInit();
-    latencyMonitorInit();
-    bioInit();
 }
 
 /* Populates the Redis Command Table starting from the hard coded list
