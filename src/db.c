@@ -33,10 +33,6 @@
 #include <signal.h>
 #include <ctype.h>
 
-void slotToKeyAdd(robj *key);
-void slotToKeyDel(robj *key);
-void slotToKeyFlush(void);
-
 /*-----------------------------------------------------------------------------
  * C-level DB API
  *----------------------------------------------------------------------------*/
@@ -49,15 +45,7 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
     if (de) {
         robj *val = dictGetVal(de);
 
-        /* Update the access time for the ageing algorithm.
-         * Don't do it if we have a saving child, as this will trigger
-         * a copy on write madness. */
-        if (server.rdb_child_pid == -1 &&
-            server.aof_child_pid == -1 &&
-            !(flags & LOOKUP_NOTOUCH))
-        {
-            val->lru = LRU_CLOCK();
-        }
+		val->lru = LRU_CLOCK();
         return val;
     } else {
         return NULL;
@@ -157,10 +145,7 @@ robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply) {
 void dbAdd(redisDb *db, robj *key, robj *val) {
     sds copy = sdsdup(key->ptr);
     int retval = dictAdd(db->dict, copy, val);
-
-    serverAssertWithInfo(NULL,key,retval == DICT_OK);
     if (val->type == OBJ_LIST) signalListAsReady(db, key);
-    if (server.cluster_enabled) slotToKeyAdd(key);
  }
 
 /* Overwrite an existing key with a new value. Incrementing the reference
@@ -171,7 +156,6 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
 void dbOverwrite(redisDb *db, robj *key, robj *val) {
     dictEntry *de = dictFind(db->dict,key->ptr);
 
-    serverAssertWithInfo(NULL,key,de != NULL);
     dictReplace(db->dict, key->ptr, val);
 }
 
@@ -228,7 +212,6 @@ int dbDelete(redisDb *db, robj *key) {
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
-        if (server.cluster_enabled) slotToKeyDel(key);
         return 1;
     } else {
         return 0;
@@ -263,7 +246,6 @@ int dbDelete(redisDb *db, robj *key) {
  * using an sdscat() call to append some data, or anything else.
  */
 robj *dbUnshareStringValue(redisDb *db, robj *key, robj *o) {
-    serverAssert(o->type == OBJ_STRING);
     if (o->refcount != 1 || o->encoding != OBJ_ENCODING_RAW) {
         robj *decoded = getDecodedObject(o);
         o = createRawStringObject(decoded->ptr, sdslen(decoded->ptr));
@@ -282,7 +264,6 @@ long long emptyDb(void(callback)(void*)) {
         dictEmpty(server.db[j].dict,callback);
         dictEmpty(server.db[j].expires,callback);
     }
-    if (server.cluster_enabled) slotToKeyFlush();
     return removed;
 }
 
@@ -303,11 +284,9 @@ int selectDb(client *c, int id) {
  *----------------------------------------------------------------------------*/
 
 void signalModifiedKey(redisDb *db, robj *key) {
-    touchWatchedKey(db,key);
 }
 
 void signalFlushedDb(int dbid) {
-    touchWatchedKeysOnFlush(dbid);
 }
 
 /*-----------------------------------------------------------------------------
@@ -319,7 +298,6 @@ void flushdbCommand(client *c) {
     signalFlushedDb(c->db->id);
     dictEmpty(c->db->dict,NULL);
     dictEmpty(c->db->expires,NULL);
-    if (server.cluster_enabled) slotToKeyFlush();
     addReply(c,shared.ok);
 }
 
@@ -327,17 +305,7 @@ void flushallCommand(client *c) {
     signalFlushedDb(-1);
     server.dirty += emptyDb(NULL);
     addReply(c,shared.ok);
-    if (server.rdb_child_pid != -1) {
-        kill(server.rdb_child_pid,SIGUSR1);
-        rdbRemoveTempFile(server.rdb_child_pid);
-    }
-    if (server.saveparamslen > 0) {
-        /* Normally rdbSave() will reset dirty, but we don't want this here
-         * as otherwise FLUSHALL will not be replicated nor put into the AOF. */
-        int saved_dirty = server.dirty;
-        rdbSave(server.rdb_filename);
-        server.dirty = saved_dirty;
-    }
+
     server.dirty++;
 }
 
@@ -348,8 +316,6 @@ void delCommand(client *c) {
         expireIfNeeded(c->db,c->argv[j]);
         if (dbDelete(c->db,c->argv[j])) {
             signalModifiedKey(c->db,c->argv[j]);
-            notifyKeyspaceEvent(NOTIFY_GENERIC,
-                "del",c->argv[j],c->db->id);
             server.dirty++;
             deleted++;
         }
@@ -377,10 +343,6 @@ void selectCommand(client *c) {
         "invalid DB index") != C_OK)
         return;
 
-    if (server.cluster_enabled && id != 0) {
-        addReplyError(c,"SELECT is not allowed in cluster mode");
-        return;
-    }
     if (selectDb(c,id) == C_ERR) {
         addReplyError(c,"invalid DB index");
     } else {
@@ -499,8 +461,6 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
 
     /* Object must be NULL (to iterate keys names), or the type of the object
      * must be Set, Sorted Set, or Hash. */
-    serverAssert(o == NULL || o->type == OBJ_SET || o->type == OBJ_HASH ||
-                o->type == OBJ_ZSET);
 
     /* Set i to the first option argument. The previous one is the cursor. */
     i = (o == NULL) ? 2 : 3; /* Skip the key argument if needed. */
@@ -599,7 +559,7 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
         }
         cursor = 0;
     } else {
-        serverPanic("Not handled encoding in SCAN.");
+		printf("Not handled encoding in SCAN.");
     }
 
     /* Step 3: Filter elements. */
@@ -762,10 +722,6 @@ void renameGenericCommand(client *c, int nx) {
     dbDelete(c->db,c->argv[1]);
     signalModifiedKey(c->db,c->argv[1]);
     signalModifiedKey(c->db,c->argv[2]);
-    notifyKeyspaceEvent(NOTIFY_GENERIC,"rename_from",
-        c->argv[1],c->db->id);
-    notifyKeyspaceEvent(NOTIFY_GENERIC,"rename_to",
-        c->argv[2],c->db->id);
     server.dirty++;
     addReply(c,nx ? shared.cone : shared.ok);
 }
@@ -783,11 +739,6 @@ void moveCommand(client *c) {
     redisDb *src, *dst;
     int srcid;
     long long dbid, expire;
-
-    if (server.cluster_enabled) {
-        addReplyError(c,"MOVE is not allowed in cluster mode");
-        return;
-    }
 
     /* Obtain source and target DB pointers */
     src = c->db;
@@ -840,7 +791,7 @@ void moveCommand(client *c) {
 int removeExpire(redisDb *db, robj *key) {
     /* An expire may only be removed if there is a corresponding entry in the
      * main dict. Otherwise, the key will never be freed. */
-    serverAssertWithInfo(NULL,key,dictFind(db->dict,key->ptr) != NULL);
+
     return dictDelete(db->expires,key->ptr) == DICT_OK;
 }
 
@@ -849,7 +800,6 @@ void setExpire(redisDb *db, robj *key, long long when) {
 
     /* Reuse the sds from the main dict in the expire dict */
     kde = dictFind(db->dict,key->ptr);
-    serverAssertWithInfo(NULL,key,kde != NULL);
     de = dictReplaceRaw(db->expires,dictGetKey(kde));
     dictSetSignedIntegerVal(de,when);
 }
@@ -865,7 +815,6 @@ long long getExpire(redisDb *db, robj *key) {
 
     /* The entry was found in the expire dict, this means it should also
      * be present in the main dict (safety check). */
-    serverAssertWithInfo(NULL,key,dictFind(db->dict,key->ptr) != NULL);
     return dictGetSignedIntegerVal(de);
 }
 
@@ -885,10 +834,6 @@ void propagateExpire(redisDb *db, robj *key) {
     incrRefCount(argv[0]);
     incrRefCount(argv[1]);
 
-    if (server.aof_state != AOF_OFF)
-        feedAppendOnlyFile(server.delCommand,db->id,argv,2);
-    replicationFeedSlaves(server.slaves,db->id,argv,2);
-
     decrRefCount(argv[0]);
     decrRefCount(argv[1]);
 }
@@ -907,16 +852,7 @@ int expireIfNeeded(redisDb *db, robj *key) {
      * only the first time it is accessed and not in the middle of the
      * script execution, making propagation to slaves / AOF consistent.
      * See issue #1525 on Github for more information. */
-    now = server.lua_caller ? server.lua_time_start : mstime();
-
-    /* If we are running in the context of a slave, return ASAP:
-     * the slave key expiration is controlled by the master that will
-     * send us synthesized DEL operations for expired keys.
-     *
-     * Still we try to return the right information to the caller,
-     * that is, 0 if we think the key should be still valid, 1 if
-     * we think the key is expired at this time. */
-    if (server.masterhost != NULL) return now > when;
+    now = mstime();
 
     /* Return when this key has not expired */
     if (now <= when) return 0;
@@ -924,8 +860,6 @@ int expireIfNeeded(redisDb *db, robj *key) {
     /* Delete the key */
     server.stat_expiredkeys++;
     propagateExpire(db,key);
-    notifyKeyspaceEvent(NOTIFY_EXPIRED,
-        "expired",key,db->id);
     return dbDelete(db,key);
 }
 
@@ -962,10 +896,8 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
      *
      * Instead we take the other branch of the IF statement setting an expire
      * (possibly in the past) and wait for an explicit DEL from the master. */
-    if (when <= mstime() && !server.loading && !server.masterhost) {
+    if (when <= mstime() && !server.loading) {
         robj *aux;
-
-        serverAssertWithInfo(c,key,dbDelete(c->db,key));
         server.dirty++;
 
         /* Replicate/AOF this as an explicit DEL. */
@@ -973,14 +905,12 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         rewriteClientCommandVector(c,2,aux,key);
         decrRefCount(aux);
         signalModifiedKey(c->db,key);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",key,c->db->id);
         addReply(c, shared.cone);
         return;
     } else {
         setExpire(c->db,key,when);
         addReply(c,shared.cone);
         signalModifiedKey(c->db,key);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"expire",key,c->db->id);
         server.dirty++;
         return;
     }
@@ -1229,130 +1159,4 @@ int *migrateGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numkey
     for (i = 0; i < num; i++) keys[i] = first+i;
     *numkeys = num;
     return keys;
-}
-
-/* Helper function to extract keys from following commands:
- * GEORADIUS key x y radius unit [WITHDIST] [WITHHASH] [WITHCOORD] [ASC|DESC]
- *                             [COUNT count] [STORE key] [STOREDIST key]
- * GEORADIUSBYMEMBER key member radius unit ... options ... */
-int *georadiusGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numkeys) {
-    int i, num, *keys;
-    UNUSED(cmd);
-
-    /* Check for the presence of the stored key in the command */
-    int stored_key = -1;
-    for (i = 5; i < argc; i++) {
-        char *arg = argv[i]->ptr;
-        /* For the case when user specifies both "store" and "storedist" options, the
-         * second key specified would override the first key. This behavior is kept 
-         * the same as in georadiusCommand method.
-         */
-        if ((!strcasecmp(arg, "store") || !strcasecmp(arg, "storedist")) && ((i+1) < argc)) {
-            stored_key = i+1;
-            i++;
-        }
-    }
-    num = 1 + (stored_key == -1 ? 0 : 1);
-
-    /* Keys in the command come from two places:
-     * argv[1] = key,
-     * argv[5...n] = stored key if present
-     */
-    keys = zmalloc(sizeof(int) * num);
-
-    /* Add all key positions to keys[] */
-    keys[0] = 1;
-    if(num > 1) {
-         keys[1] = stored_key;
-    }
-    *numkeys = num; 
-    return keys;
-}
-
-/* Slot to Key API. This is used by Redis Cluster in order to obtain in
- * a fast way a key that belongs to a specified hash slot. This is useful
- * while rehashing the cluster. */
-void slotToKeyAdd(robj *key) {
-    unsigned int hashslot = keyHashSlot(key->ptr,sdslen(key->ptr));
-
-    zslInsert(server.cluster->slots_to_keys,hashslot,key);
-    incrRefCount(key);
-}
-
-void slotToKeyDel(robj *key) {
-    unsigned int hashslot = keyHashSlot(key->ptr,sdslen(key->ptr));
-
-    zslDelete(server.cluster->slots_to_keys,hashslot,key);
-}
-
-void slotToKeyFlush(void) {
-    zslFree(server.cluster->slots_to_keys);
-    server.cluster->slots_to_keys = zslCreate();
-}
-
-unsigned int getKeysInSlot(unsigned int hashslot, robj **keys, unsigned int count) {
-    zskiplistNode *n;
-    zrangespec range;
-    int j = 0;
-
-    range.min = range.max = hashslot;
-    range.minex = range.maxex = 0;
-
-    n = zslFirstInRange(server.cluster->slots_to_keys, &range);
-    while(n && n->score == hashslot && count--) {
-        keys[j++] = n->obj;
-        n = n->level[0].forward;
-    }
-    return j;
-}
-
-/* Remove all the keys in the specified hash slot.
- * The number of removed items is returned. */
-unsigned int delKeysInSlot(unsigned int hashslot) {
-    zskiplistNode *n;
-    zrangespec range;
-    int j = 0;
-
-    range.min = range.max = hashslot;
-    range.minex = range.maxex = 0;
-
-    n = zslFirstInRange(server.cluster->slots_to_keys, &range);
-    while(n && n->score == hashslot) {
-        robj *key = n->obj;
-        n = n->level[0].forward; /* Go to the next item before freeing it. */
-        incrRefCount(key); /* Protect the object while freeing it. */
-        dbDelete(&server.db[0],key);
-        decrRefCount(key);
-        j++;
-    }
-    return j;
-}
-
-unsigned int countKeysInSlot(unsigned int hashslot) {
-    zskiplist *zsl = server.cluster->slots_to_keys;
-    zskiplistNode *zn;
-    zrangespec range;
-    int rank, count = 0;
-
-    range.min = range.max = hashslot;
-    range.minex = range.maxex = 0;
-
-    /* Find first element in range */
-    zn = zslFirstInRange(zsl, &range);
-
-    /* Use rank of first element, if any, to determine preliminary count */
-    if (zn != NULL) {
-        rank = zslGetRank(zsl, zn->score, zn->obj);
-        count = (zsl->length - (rank - 1));
-
-        /* Find last element in range */
-        zn = zslLastInRange(zsl, &range);
-
-        /* Use rank of last element, if any, to determine the actual count */
-        if (zn != NULL) {
-            rank = zslGetRank(zsl, zn->score, zn->obj);
-            count -= (zsl->length - rank);
-        }
-    }
-    return count;
 }

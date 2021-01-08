@@ -176,7 +176,7 @@ robj *dupStringObject(robj *o) {
         d->ptr = o->ptr;
         return d;
     default:
-        serverPanic("Wrong encoding.");
+		printf("Wrong encoding.");
         break;
     }
 }
@@ -257,7 +257,7 @@ void freeSetObject(robj *o) {
         zfree(o->ptr);
         break;
     default:
-        serverPanic("Unknown set encoding type");
+		printf("Unknown set encoding type");
     }
 }
 
@@ -274,7 +274,7 @@ void freeZsetObject(robj *o) {
         zfree(o->ptr);
         break;
     default:
-        serverPanic("Unknown sorted set encoding");
+		printf("Unknown sorted set encoding");
     }
 }
 
@@ -287,7 +287,7 @@ void freeHashObject(robj *o) {
         zfree(o->ptr);
         break;
     default:
-        serverPanic("Unknown hash encoding type");
+		printf("Unknown hash encoding type");
         break;
     }
 }
@@ -305,7 +305,7 @@ void decrRefCount(robj *o) {
         case OBJ_SET: freeSetObject(o); break;
         case OBJ_ZSET: freeZsetObject(o); break;
         case OBJ_HASH: freeHashObject(o); break;
-        default: serverPanic("Unknown object type"); break;
+        default: printf("Unknown object type"); break;
         }
         zfree(o);
     } else {
@@ -346,7 +346,6 @@ int checkType(client *c, robj *o, int type) {
 }
 
 int isObjectRepresentableAsLongLong(robj *o, long long *llval) {
-    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
     if (o->encoding == OBJ_ENCODING_INT) {
         if (llval) *llval = (long) o->ptr;
         return C_OK;
@@ -365,7 +364,6 @@ robj *tryObjectEncoding(robj *o) {
      * in this function. Other types use encoded memory efficient
      * representations but are handled by the commands implementing
      * the type. */
-    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
 
     /* We try some specialized encoding only for objects that are
      * RAW or EMBSTR encoded, in other words objects that are still
@@ -451,7 +449,7 @@ robj *getDecodedObject(robj *o) {
         dec = createStringObject(buf,strlen(buf));
         return dec;
     } else {
-        serverPanic("Unknown encoding type");
+		printf("Unknown encoding type");
     }
 }
 
@@ -467,7 +465,6 @@ robj *getDecodedObject(robj *o) {
 #define REDIS_COMPARE_COLL (1<<1)
 
 int compareStringObjectsWithFlags(robj *a, robj *b, int flags) {
-    serverAssertWithInfo(NULL,a,a->type == OBJ_STRING && b->type == OBJ_STRING);
     char bufa[128], bufb[128], *astr, *bstr;
     size_t alen, blen, minlen;
 
@@ -524,7 +521,6 @@ int equalStringObjects(robj *a, robj *b) {
 }
 
 size_t stringObjectLen(robj *o) {
-    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
     if (sdsEncodedObject(o)) {
         return sdslen(o->ptr);
     } else {
@@ -539,7 +535,6 @@ int getDoubleFromObject(robj *o, double *target) {
     if (o == NULL) {
         value = 0;
     } else {
-        serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
         if (sdsEncodedObject(o)) {
             errno = 0;
             value = strtod(o->ptr, &eptr);
@@ -553,7 +548,7 @@ int getDoubleFromObject(robj *o, double *target) {
         } else if (o->encoding == OBJ_ENCODING_INT) {
             value = (long)o->ptr;
         } else {
-            serverPanic("Unknown string encoding");
+            printf("Unknown string encoding");
         }
     }
     *target = value;
@@ -581,7 +576,6 @@ int getLongDoubleFromObject(robj *o, long double *target) {
     if (o == NULL) {
         value = 0;
     } else {
-        serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
         if (sdsEncodedObject(o)) {
             errno = 0;
             value = strtold(o->ptr, &eptr);
@@ -591,7 +585,7 @@ int getLongDoubleFromObject(robj *o, long double *target) {
         } else if (o->encoding == OBJ_ENCODING_INT) {
             value = (long)o->ptr;
         } else {
-            serverPanic("Unknown string encoding");
+            printf("Unknown string encoding");
         }
     }
     *target = value;
@@ -618,13 +612,12 @@ int getLongLongFromObject(robj *o, long long *target) {
     if (o == NULL) {
         value = 0;
     } else {
-        serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
         if (sdsEncodedObject(o)) {
             if (string2ll(o->ptr,sdslen(o->ptr),&value) == 0) return C_ERR;
         } else if (o->encoding == OBJ_ENCODING_INT) {
             value = (long)o->ptr;
         } else {
-            serverPanic("Unknown string encoding");
+            printf("Unknown string encoding");
         }
     }
     if (target) *target = value;
