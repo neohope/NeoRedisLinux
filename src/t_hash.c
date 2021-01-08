@@ -70,8 +70,6 @@ int hashTypeGetFromZiplist(robj *o, robj *field,
     unsigned char *zl, *fptr = NULL, *vptr = NULL;
     int ret;
 
-    serverAssert(o->encoding == OBJ_ENCODING_ZIPLIST);
-
     field = getDecodedObject(field);
 
     zl = o->ptr;
@@ -81,7 +79,6 @@ int hashTypeGetFromZiplist(robj *o, robj *field,
         if (fptr != NULL) {
             /* Grab pointer to the value (fptr points to the field) */
             vptr = ziplistNext(zl, fptr);
-            serverAssert(vptr != NULL);
         }
     }
 
@@ -89,7 +86,6 @@ int hashTypeGetFromZiplist(robj *o, robj *field,
 
     if (vptr != NULL) {
         ret = ziplistGet(vptr, vstr, vlen, vll);
-        serverAssert(ret);
         return 0;
     }
 
@@ -100,8 +96,6 @@ int hashTypeGetFromZiplist(robj *o, robj *field,
  * Returns -1 when the field cannot be found. */
 int hashTypeGetFromHashTable(robj *o, robj *field, robj **value) {
     dictEntry *de;
-
-    serverAssert(o->encoding == OBJ_ENCODING_HT);
 
     de = dictFind(o->ptr, field);
     if (de == NULL) return -1;
@@ -161,7 +155,7 @@ size_t hashTypeGetValueLength(robj *o, robj *field) {
         if (hashTypeGetFromHashTable(o, field, &aux) == 0)
             len = stringObjectLen(aux);
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return len;
 }
@@ -180,7 +174,7 @@ int hashTypeExists(robj *o, robj *field) {
 
         if (hashTypeGetFromHashTable(o, field, &aux) == 0) return 1;
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return 0;
 }
@@ -205,7 +199,6 @@ int hashTypeSet(robj *o, robj *field, robj *value) {
             if (fptr != NULL) {
                 /* Grab pointer to the value (fptr points to the field) */
                 vptr = ziplistNext(zl, fptr);
-                serverAssert(vptr != NULL);
                 update = 1;
 
                 /* Delete value */
@@ -236,7 +229,7 @@ int hashTypeSet(robj *o, robj *field, robj *value) {
         }
         incrRefCount(value);
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return update;
 }
@@ -274,7 +267,7 @@ int hashTypeDelete(robj *o, robj *field) {
         }
 
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 
     return deleted;
@@ -289,7 +282,7 @@ unsigned long hashTypeLength(robj *o) {
     } else if (o->encoding == OBJ_ENCODING_HT) {
         length = dictSize((dict*)o->ptr);
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 
     return length;
@@ -306,7 +299,7 @@ hashTypeIterator *hashTypeInitIterator(robj *subject) {
     } else if (hi->encoding == OBJ_ENCODING_HT) {
         hi->di = dictGetIterator(subject->ptr);
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 
     return hi;
@@ -333,18 +326,15 @@ int hashTypeNext(hashTypeIterator *hi) {
 
         if (fptr == NULL) {
             /* Initialize cursor */
-            serverAssert(vptr == NULL);
             fptr = ziplistIndex(zl, 0);
         } else {
             /* Advance cursor */
-            serverAssert(vptr != NULL);
             fptr = ziplistNext(zl, vptr);
         }
         if (fptr == NULL) return C_ERR;
 
         /* Grab pointer to the value (fptr points to the field) */
         vptr = ziplistNext(zl, fptr);
-        serverAssert(vptr != NULL);
 
         /* fptr, vptr now point to the first or next pair */
         hi->fptr = fptr;
@@ -352,7 +342,7 @@ int hashTypeNext(hashTypeIterator *hi) {
     } else if (hi->encoding == OBJ_ENCODING_HT) {
         if ((hi->de = dictNext(hi->di)) == NULL) return C_ERR;
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return C_OK;
 }
@@ -366,21 +356,16 @@ void hashTypeCurrentFromZiplist(hashTypeIterator *hi, int what,
 {
     int ret;
 
-    serverAssert(hi->encoding == OBJ_ENCODING_ZIPLIST);
-
-    if (what & OBJ_HASH_KEY) {
+    if (what & REDIS_HASH_KEY) {
         ret = ziplistGet(hi->fptr, vstr, vlen, vll);
-        serverAssert(ret);
     } else {
         ret = ziplistGet(hi->vptr, vstr, vlen, vll);
-        serverAssert(ret);
     }
 }
 
 /* Get the field or value at iterator cursor, for an iterator on a hash value
  * encoded as a ziplist. Prototype is similar to `hashTypeGetFromHashTable`. */
 void hashTypeCurrentFromHashTable(hashTypeIterator *hi, int what, robj **dst) {
-    serverAssert(hi->encoding == OBJ_ENCODING_HT);
 
     if (what & OBJ_HASH_KEY) {
         *dst = dictGetKey(hi->de);
@@ -410,7 +395,7 @@ robj *hashTypeCurrentObject(hashTypeIterator *hi, int what) {
         hashTypeCurrentFromHashTable(hi, what, &dst);
         incrRefCount(dst);
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return dst;
 }
@@ -430,7 +415,6 @@ robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
 }
 
 void hashTypeConvertZiplist(robj *o, int enc) {
-    serverAssert(o->encoding == OBJ_ENCODING_ZIPLIST);
 
     if (enc == OBJ_ENCODING_ZIPLIST) {
         /* Nothing to do... */
@@ -451,11 +435,6 @@ void hashTypeConvertZiplist(robj *o, int enc) {
             value = hashTypeCurrentObject(hi, OBJ_HASH_VALUE);
             value = tryObjectEncoding(value);
             ret = dictAdd(dict, field, value);
-            if (ret != DICT_OK) {
-                serverLogHexDump(LL_WARNING,"ziplist with dup elements dump",
-                    o->ptr,ziplistBlobLen(o->ptr));
-                serverAssert(ret == DICT_OK);
-            }
         }
 
         hashTypeReleaseIterator(hi);
@@ -465,7 +444,7 @@ void hashTypeConvertZiplist(robj *o, int enc) {
         o->ptr = dict;
 
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 }
 
@@ -473,9 +452,9 @@ void hashTypeConvert(robj *o, int enc) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         hashTypeConvertZiplist(o, enc);
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        serverPanic("Not implemented");
+        printf("Not implemented");
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 }
 
@@ -493,7 +472,6 @@ void hsetCommand(client *c) {
     update = hashTypeSet(o,c->argv[2],c->argv[3]);
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
-    notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
     server.dirty++;
 }
 
@@ -509,7 +487,6 @@ void hsetnxCommand(client *c) {
         hashTypeSet(o,c->argv[2],c->argv[3]);
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
         server.dirty++;
     }
 }
@@ -531,7 +508,6 @@ void hmsetCommand(client *c) {
     }
     addReply(c, shared.ok);
     signalModifiedKey(c->db,c->argv[1]);
-    notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
     server.dirty++;
 }
 
@@ -565,7 +541,6 @@ void hincrbyCommand(client *c) {
     decrRefCount(new);
     addReplyLongLong(c,value);
     signalModifiedKey(c->db,c->argv[1]);
-    notifyKeyspaceEvent(NOTIFY_HASH,"hincrby",c->argv[1],c->db->id);
     server.dirty++;
 }
 
@@ -592,7 +567,6 @@ void hincrbyfloatCommand(client *c) {
     hashTypeSet(o,c->argv[2],new);
     addReplyBulk(c,new);
     signalModifiedKey(c->db,c->argv[1]);
-    notifyKeyspaceEvent(NOTIFY_HASH,"hincrbyfloat",c->argv[1],c->db->id);
     server.dirty++;
 
     /* Always replicate HINCRBYFLOAT as an HSET command with the final value
@@ -640,7 +614,7 @@ static void addHashFieldToReply(client *c, robj *o, robj *field) {
         }
 
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 }
 
@@ -690,10 +664,6 @@ void hdelCommand(client *c) {
     }
     if (deleted) {
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_HASH,"hdel",c->argv[1],c->db->id);
-        if (keyremoved)
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],
-                                c->db->id);
         server.dirty += deleted;
     }
     addReplyLongLong(c,deleted);
@@ -736,7 +706,7 @@ static void addHashIteratorCursorToReply(client *c, hashTypeIterator *hi, int wh
         addReplyBulk(c, value);
 
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
 }
 
@@ -768,7 +738,6 @@ void genericHgetallCommand(client *c, int flags) {
     }
 
     hashTypeReleaseIterator(hi);
-    serverAssert(count == length);
 }
 
 void hkeysCommand(client *c) {

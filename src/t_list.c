@@ -46,7 +46,7 @@ void listTypePush(robj *subject, robj *value, int where) {
         quicklistPush(subject->ptr, value->ptr, len, pos);
         decrRefCount(value);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
@@ -66,7 +66,7 @@ robj *listTypePop(robj *subject, int where) {
                 value = createStringObjectFromLongLong(vlong);
         }
     } else {
-        serverPanic("Unknown list encoding");
+		printf("Unknown list encoding");
     }
     return value;
 }
@@ -75,7 +75,7 @@ unsigned long listTypeLength(robj *subject) {
     if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
         return quicklistCount(subject->ptr);
     } else {
-        serverPanic("Unknown list encoding");
+		printf("Unknown list encoding");
     }
 }
 
@@ -95,7 +95,7 @@ listTypeIterator *listTypeInitIterator(robj *subject, long index,
         li->iter = quicklistGetIteratorAtIdx(li->subject->ptr,
                                              iter_direction, index);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
     return li;
 }
@@ -110,14 +110,11 @@ void listTypeReleaseIterator(listTypeIterator *li) {
  * and advances the position of the iterator. Returns 1 when the current
  * entry is in fact an entry, 0 otherwise. */
 int listTypeNext(listTypeIterator *li, listTypeEntry *entry) {
-    /* Protect from converting when iterating */
-    serverAssert(li->subject->encoding == li->encoding);
-
     entry->li = li;
     if (li->encoding == OBJ_ENCODING_QUICKLIST) {
         return quicklistNext(li->iter, &entry->entry);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
     return 0;
 }
@@ -133,7 +130,7 @@ robj *listTypeGet(listTypeEntry *entry) {
             value = createStringObjectFromLongLong(entry->entry.longval);
         }
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
     return value;
 }
@@ -152,7 +149,7 @@ void listTypeInsert(listTypeEntry *entry, robj *value, int where) {
         }
         decrRefCount(value);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
@@ -162,7 +159,7 @@ int listTypeEqual(listTypeEntry *entry, robj *o) {
         serverAssertWithInfo(NULL,o,sdsEncodedObject(o));
         return quicklistCompare(entry->entry.zi,o->ptr,sdslen(o->ptr));
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
@@ -171,22 +168,19 @@ void listTypeDelete(listTypeIterator *iter, listTypeEntry *entry) {
     if (entry->li->encoding == OBJ_ENCODING_QUICKLIST) {
         quicklistDelEntry(iter->iter, &entry->entry);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
 /* Create a quicklist from a single ziplist */
 void listTypeConvert(robj *subject, int enc) {
-    serverAssertWithInfo(NULL,subject,subject->type==OBJ_LIST);
-    serverAssertWithInfo(NULL,subject,subject->encoding==OBJ_ENCODING_ZIPLIST);
-
     if (enc == OBJ_ENCODING_QUICKLIST) {
         size_t zlen = server.list_max_ziplist_size;
         int depth = server.list_compress_depth;
         subject->ptr = quicklistCreateFromZiplist(zlen, depth, subject->ptr);
         subject->encoding = OBJ_ENCODING_QUICKLIST;
     } else {
-        serverPanic("Unsupported list conversion");
+        printf("Unsupported list conversion");
     }
 }
 
@@ -219,7 +213,6 @@ void pushGenericCommand(client *c, int where) {
         char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
 
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_LIST,event,c->argv[1],c->db->id);
     }
     server.dirty += pushed;
 }
@@ -255,8 +248,6 @@ void pushxGenericCommand(client *c, robj *refval, robj *val, int where) {
 
         if (inserted) {
             signalModifiedKey(c->db,c->argv[1]);
-            notifyKeyspaceEvent(NOTIFY_LIST,"linsert",
-                                c->argv[1],c->db->id);
             server.dirty++;
         } else {
             /* Notify client of a failed insert */
@@ -268,7 +259,6 @@ void pushxGenericCommand(client *c, robj *refval, robj *val, int where) {
 
         listTypePush(subject,val,where);
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_LIST,event,c->argv[1],c->db->id);
         server.dirty++;
     }
 
@@ -325,7 +315,7 @@ void lindexCommand(client *c) {
             addReply(c,shared.nullbulk);
         }
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
@@ -347,11 +337,10 @@ void lsetCommand(client *c) {
         } else {
             addReply(c,shared.ok);
             signalModifiedKey(c->db,c->argv[1]);
-            notifyKeyspaceEvent(NOTIFY_LIST,"lset",c->argv[1],c->db->id);
             server.dirty++;
         }
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 }
 
@@ -367,10 +356,7 @@ void popGenericCommand(client *c, int where) {
 
         addReplyBulk(c,value);
         decrRefCount(value);
-        notifyKeyspaceEvent(NOTIFY_LIST,event,c->argv[1],c->db->id);
         if (listTypeLength(o) == 0) {
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
-                                c->argv[1],c->db->id);
             dbDelete(c->db,c->argv[1]);
         }
         signalModifiedKey(c->db,c->argv[1]);
@@ -428,7 +414,7 @@ void lrangeCommand(client *c) {
         }
         listTypeReleaseIterator(iter);
     } else {
-        serverPanic("List encoding is not QUICKLIST!");
+        printf("List encoding is not LINKEDLIST nor ZIPLIST!");
     }
 }
 
@@ -465,13 +451,11 @@ void ltrimCommand(client *c) {
         quicklistDelRange(o->ptr,0,ltrim);
         quicklistDelRange(o->ptr,-rtrim,rtrim);
     } else {
-        serverPanic("Unknown list encoding");
+        printf("Unknown list encoding");
     }
 
-    notifyKeyspaceEvent(NOTIFY_LIST,"ltrim",c->argv[1],c->db->id);
     if (listTypeLength(o) == 0) {
         dbDelete(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
     }
     signalModifiedKey(c->db,c->argv[1]);
     server.dirty++;
@@ -511,12 +495,10 @@ void lremCommand(client *c) {
 
     if (removed) {
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"lrem",c->argv[1],c->db->id);
     }
 
     if (listTypeLength(subject) == 0) {
         dbDelete(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
     }
 
     addReplyLongLong(c,removed);
@@ -548,7 +530,6 @@ void rpoplpushHandlePush(client *c, robj *dstkey, robj *dstobj, robj *value) {
     }
     signalModifiedKey(c->db,dstkey);
     listTypePush(dstobj,value,LIST_HEAD);
-    notifyKeyspaceEvent(NOTIFY_LIST,"lpush",dstkey,c->db->id);
     /* Always send the pushed value to the client. */
     addReplyBulk(c,value);
 }
@@ -578,11 +559,8 @@ void rpoplpushCommand(client *c) {
         decrRefCount(value);
 
         /* Delete the source list when it is empty */
-        notifyKeyspaceEvent(NOTIFY_LIST,"rpop",touchedkey,c->db->id);
         if (listTypeLength(sobj) == 0) {
             dbDelete(c->db,touchedkey);
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
-                                touchedkey,c->db->id);
         }
         signalModifiedKey(c->db,touchedkey);
         decrRefCount(touchedkey);
@@ -637,7 +615,6 @@ void blockForKeys(client *c, robj **keys, int numkeys, mstime_t timeout, robj *t
             l = listCreate();
             retval = dictAdd(c->db->blocking_keys,keys[j],l);
             incrRefCount(keys[j]);
-            serverAssertWithInfo(c,keys[j],retval == DICT_OK);
         } else {
             l = dictGetVal(de);
         }
@@ -653,7 +630,6 @@ void unblockClientWaitingData(client *c) {
     dictIterator *di;
     list *l;
 
-    serverAssertWithInfo(c,NULL,dictSize(c->bpop.keys) != 0);
     di = dictGetIterator(c->bpop.keys);
     /* The client may wait for multiple keys, so unblock it for every key. */
     while((de = dictNext(di)) != NULL) {
@@ -661,7 +637,6 @@ void unblockClientWaitingData(client *c) {
 
         /* Remove this client from the list of clients waiting for this key. */
         l = dictFetchValue(c->db->blocking_keys,key);
-        serverAssertWithInfo(c,key,l != NULL);
         listDelNode(l,listSearchKey(l,c));
         /* If the list is empty we need to remove it to avoid wasting memory */
         if (listLength(l) == 0)
@@ -704,7 +679,6 @@ void signalListAsReady(redisDb *db, robj *key) {
      * to avoid adding it multiple times into a list with a simple O(1)
      * check. */
     incrRefCount(key);
-    serverAssert(dictAdd(db->ready_keys,key,NULL) == DICT_OK);
 }
 
 /* This is a helper function for handleClientsBlockedOnLists(). It's work
@@ -887,18 +861,13 @@ void blockingPopGenericCommand(client *c, int where) {
                     /* Non empty list, this is like a non normal [LR]POP. */
                     char *event = (where == LIST_HEAD) ? "lpop" : "rpop";
                     robj *value = listTypePop(o,where);
-                    serverAssert(value != NULL);
 
                     addReplyMultiBulkLen(c,2);
                     addReplyBulk(c,c->argv[j]);
                     addReplyBulk(c,value);
                     decrRefCount(value);
-                    notifyKeyspaceEvent(NOTIFY_LIST,event,
-                                        c->argv[j],c->db->id);
                     if (listTypeLength(o) == 0) {
                         dbDelete(c->db,c->argv[j]);
-                        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
-                                            c->argv[j],c->db->id);
                     }
                     signalModifiedKey(c->db,c->argv[j]);
                     server.dirty++;
@@ -955,7 +924,6 @@ void brpoplpushCommand(client *c) {
         } else {
             /* The list exists and has elements, so
              * the regular rpoplpushCommand is executed. */
-            serverAssertWithInfo(c,key,listTypeLength(key) > 0);
             rpoplpushCommand(c);
         }
     }

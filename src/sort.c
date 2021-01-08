@@ -250,22 +250,9 @@ void sortCommand(client *c) {
              * we don't need to sort nor to lookup the weight keys. */
             if (strchr(c->argv[j+1]->ptr,'*') == NULL) {
                 dontsort = 1;
-            } else {
-                /* If BY is specified with a real patter, we can't accept
-                 * it in cluster mode. */
-                if (server.cluster_enabled) {
-                    addReplyError(c,"BY option of SORT denied in Cluster mode.");
-                    syntax_error++;
-                    break;
-                }
             }
             j++;
         } else if (!strcasecmp(c->argv[j]->ptr,"get") && leftargs >= 1) {
-            if (server.cluster_enabled) {
-                addReplyError(c,"GET option of SORT denied in Cluster mode.");
-                syntax_error++;
-                break;
-            }
             listAddNodeTail(operations,createSortOperation(
                 SORT_OP_GET,c->argv[j+1]));
             getop++;
@@ -293,7 +280,7 @@ void sortCommand(client *c) {
      * scripting and replication. */
     if (dontsort &&
         sortval->type == OBJ_SET &&
-        (storekey || c->flags & CLIENT_LUA))
+        storekey)
     {
         /* Force ALPHA sorting */
         dontsort = 0;
@@ -416,7 +403,6 @@ void sortCommand(client *c) {
         }
 
         while(rangelen--) {
-            serverAssertWithInfo(c,sortval,ln != NULL);
             ele = ln->obj;
             vector[j].obj = ele;
             vector[j].u.score = 0;
@@ -440,9 +426,8 @@ void sortCommand(client *c) {
         }
         dictReleaseIterator(di);
     } else {
-        serverPanic("Unknown type");
+        printf("Unknown type");
     }
-    serverAssertWithInfo(c,sortval,j == vectorlen);
 
     /* Now it's time to load the right scores in the sorting vector */
     if (dontsort == 0) {
@@ -475,7 +460,6 @@ void sortCommand(client *c) {
                      * far. We can just cast it */
                     vector[j].u.score = (long)byval->ptr;
                 } else {
-                    serverAssertWithInfo(c,sortval,1 != 1);
                 }
             }
 
@@ -526,7 +510,6 @@ void sortCommand(client *c) {
                     }
                 } else {
                     /* Always fails */
-                    serverAssertWithInfo(c,sortval,sop->type == SORT_OP_GET);
                 }
             }
         }
@@ -557,19 +540,15 @@ void sortCommand(client *c) {
                         decrRefCount(val);
                     } else {
                         /* Always fails */
-                        serverAssertWithInfo(c,sortval,sop->type == SORT_OP_GET);
                     }
                 }
             }
         }
         if (outputlen) {
             setKey(c->db,storekey,sobj);
-            notifyKeyspaceEvent(NOTIFY_LIST,"sortstore",storekey,
-                                c->db->id);
             server.dirty += outputlen;
         } else if (dbDelete(c->db,storekey)) {
             signalModifiedKey(c->db,storekey);
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",storekey,c->db->id);
             server.dirty++;
         }
         decrRefCount(sobj);

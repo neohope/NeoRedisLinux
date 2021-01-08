@@ -112,7 +112,6 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, robj *obj) {
     unsigned int rank[ZSKIPLIST_MAXLEVEL];
     int i, level;
 
-    serverAssert(!isnan(score));
     x = zsl->header;
     for (i = zsl->level-1; i >= 0; i--) {
         /* store rank that is crossed to reach the insert position */
@@ -253,7 +252,6 @@ zskiplistNode *zslFirstInRange(zskiplist *zsl, zrangespec *range) {
 
     /* This is an inner range, so the next node cannot be NULL. */
     x = x->level[0].forward;
-    serverAssert(x != NULL);
 
     /* Check if score <= max. */
     if (!zslValueLteMax(x->score,range)) return NULL;
@@ -276,9 +274,6 @@ zskiplistNode *zslLastInRange(zskiplist *zsl, zrangespec *range) {
             zslValueLteMax(x->level[i].forward->score,range))
                 x = x->level[i].forward;
     }
-
-    /* This is an inner range, so this node cannot be NULL. */
-    serverAssert(x != NULL);
 
     /* Check if score >= min. */
     if (!zslValueGteMin(x->score,range)) return NULL;
@@ -596,7 +591,6 @@ zskiplistNode *zslFirstInLexRange(zskiplist *zsl, zlexrangespec *range) {
 
     /* This is an inner range, so the next node cannot be NULL. */
     x = x->level[0].forward;
-    serverAssert(x != NULL);
 
     /* Check if score <= max. */
     if (!zslLexValueLteMax(x->obj,range)) return NULL;
@@ -620,9 +614,6 @@ zskiplistNode *zslLastInLexRange(zskiplist *zsl, zlexrangespec *range) {
                 x = x->level[i].forward;
     }
 
-    /* This is an inner range, so this node cannot be NULL. */
-    serverAssert(x != NULL);
-
     /* Check if score >= min. */
     if (!zslLexValueGteMin(x->obj,range)) return NULL;
     return x;
@@ -638,9 +629,6 @@ double zzlGetScore(unsigned char *sptr) {
     long long vlong;
     char buf[128];
     double score;
-
-    serverAssert(sptr != NULL);
-    serverAssert(ziplistGet(sptr,&vstr,&vlen,&vlong));
 
     if (vstr) {
         memcpy(buf,vstr,vlen);
@@ -661,9 +649,6 @@ robj *ziplistGetObject(unsigned char *sptr) {
     unsigned int vlen;
     long long vlong;
 
-    serverAssert(sptr != NULL);
-    serverAssert(ziplistGet(sptr,&vstr,&vlen,&vlong));
-
     if (vstr) {
         return createStringObject((char*)vstr,vlen);
     } else {
@@ -679,7 +664,6 @@ int zzlCompareElements(unsigned char *eptr, unsigned char *cstr, unsigned int cl
     unsigned char vbuf[32];
     int minlen, cmp;
 
-    serverAssert(ziplistGet(eptr,&vstr,&vlen,&vlong));
     if (vstr == NULL) {
         /* Store string representation of long long in buf. */
         vlen = ll2string((char*)vbuf,sizeof(vbuf),vlong);
@@ -700,12 +684,10 @@ unsigned int zzlLength(unsigned char *zl) {
  * NULL when there is no next entry. */
 void zzlNext(unsigned char *zl, unsigned char **eptr, unsigned char **sptr) {
     unsigned char *_eptr, *_sptr;
-    serverAssert(*eptr != NULL && *sptr != NULL);
 
     _eptr = ziplistNext(zl,*sptr);
     if (_eptr != NULL) {
         _sptr = ziplistNext(zl,_eptr);
-        serverAssert(_sptr != NULL);
     } else {
         /* No next entry. */
         _sptr = NULL;
@@ -719,12 +701,10 @@ void zzlNext(unsigned char *zl, unsigned char **eptr, unsigned char **sptr) {
  * set to NULL when there is no next entry. */
 void zzlPrev(unsigned char *zl, unsigned char **eptr, unsigned char **sptr) {
     unsigned char *_eptr, *_sptr;
-    serverAssert(*eptr != NULL && *sptr != NULL);
 
     _sptr = ziplistPrev(zl,*eptr);
     if (_sptr != NULL) {
         _eptr = ziplistPrev(zl,_sptr);
-        serverAssert(_eptr != NULL);
     } else {
         /* No previous entry. */
         _eptr = NULL;
@@ -752,7 +732,6 @@ int zzlIsInRange(unsigned char *zl, zrangespec *range) {
         return 0;
 
     p = ziplistIndex(zl,1); /* First score. */
-    serverAssert(p != NULL);
     score = zzlGetScore(p);
     if (!zslValueLteMax(score,range))
         return 0;
@@ -771,7 +750,6 @@ unsigned char *zzlFirstInRange(unsigned char *zl, zrangespec *range) {
 
     while (eptr != NULL) {
         sptr = ziplistNext(zl,eptr);
-        serverAssert(sptr != NULL);
 
         score = zzlGetScore(sptr);
         if (zslValueGteMin(score,range)) {
@@ -799,7 +777,6 @@ unsigned char *zzlLastInRange(unsigned char *zl, zrangespec *range) {
 
     while (eptr != NULL) {
         sptr = ziplistNext(zl,eptr);
-        serverAssert(sptr != NULL);
 
         score = zzlGetScore(sptr);
         if (zslValueLteMax(score,range)) {
@@ -812,8 +789,7 @@ unsigned char *zzlLastInRange(unsigned char *zl, zrangespec *range) {
         /* Move to previous element by moving to the score of previous element.
          * When this returns NULL, we know there also is no element. */
         sptr = ziplistPrev(zl,eptr);
-        if (sptr != NULL)
-            serverAssert((eptr = ziplistPrev(zl,sptr)) != NULL);
+		if (sptr != NULL) {}
         else
             eptr = NULL;
     }
@@ -852,7 +828,6 @@ int zzlIsInLexRange(unsigned char *zl, zlexrangespec *range) {
         return 0;
 
     p = ziplistIndex(zl,0); /* First element. */
-    serverAssert(p != NULL);
     if (!zzlLexValueLteMax(p,range))
         return 0;
 
@@ -877,7 +852,6 @@ unsigned char *zzlFirstInLexRange(unsigned char *zl, zlexrangespec *range) {
 
         /* Move to next element. */
         sptr = ziplistNext(zl,eptr); /* This element score. Skip it. */
-        serverAssert(sptr != NULL);
         eptr = ziplistNext(zl,sptr); /* Next element. */
     }
 
@@ -903,8 +877,7 @@ unsigned char *zzlLastInLexRange(unsigned char *zl, zlexrangespec *range) {
         /* Move to previous element by moving to the score of previous element.
          * When this returns NULL, we know there also is no element. */
         sptr = ziplistPrev(zl,eptr);
-        if (sptr != NULL)
-            serverAssert((eptr = ziplistPrev(zl,sptr)) != NULL);
+		if (sptr != NULL){}
         else
             eptr = NULL;
     }
@@ -918,7 +891,6 @@ unsigned char *zzlFind(unsigned char *zl, robj *ele, double *score) {
     ele = getDecodedObject(ele);
     while (eptr != NULL) {
         sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(NULL,ele,sptr != NULL);
 
         if (ziplistCompare(eptr,ele->ptr,sdslen(ele->ptr))) {
             /* Matching element, pull out score. */
@@ -952,7 +924,6 @@ unsigned char *zzlInsertAt(unsigned char *zl, unsigned char *eptr, robj *ele, do
     int scorelen;
     size_t offset;
 
-    serverAssertWithInfo(NULL,ele,sdsEncodedObject(ele));
     scorelen = d2string(scorebuf,sizeof(scorebuf),score);
     if (eptr == NULL) {
         zl = ziplistPush(zl,ele->ptr,sdslen(ele->ptr),ZIPLIST_TAIL);
@@ -964,7 +935,6 @@ unsigned char *zzlInsertAt(unsigned char *zl, unsigned char *eptr, robj *ele, do
         eptr = zl+offset;
 
         /* Insert score after the element. */
-        serverAssertWithInfo(NULL,ele,(sptr = ziplistNext(zl,eptr)) != NULL);
         zl = ziplistInsert(zl,sptr,(unsigned char*)scorebuf,scorelen);
     }
 
@@ -980,7 +950,6 @@ unsigned char *zzlInsert(unsigned char *zl, robj *ele, double score) {
     ele = getDecodedObject(ele);
     while (eptr != NULL) {
         sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(NULL,ele,sptr != NULL);
         s = zzlGetScore(sptr);
 
         if (s > score) {
@@ -1085,7 +1054,7 @@ unsigned int zsetLength(robj *zobj) {
     } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
         length = ((zset*)zobj->ptr)->zsl->length;
     } else {
-        serverPanic("Unknown sorted set encoding");
+		printf("Unknown sorted set encoding");
     }
     return length;
 }
@@ -1105,20 +1074,17 @@ void zsetConvert(robj *zobj, int encoding) {
         long long vlong;
 
         if (encoding != OBJ_ENCODING_SKIPLIST)
-            serverPanic("Unknown target encoding");
+            printf("Unknown target encoding");
 
         zs = zmalloc(sizeof(*zs));
         zs->dict = dictCreate(&zsetDictType,NULL);
         zs->zsl = zslCreate();
 
         eptr = ziplistIndex(zl,0);
-        serverAssertWithInfo(NULL,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(NULL,zobj,sptr != NULL);
 
         while (eptr != NULL) {
             score = zzlGetScore(sptr);
-            serverAssertWithInfo(NULL,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
             if (vstr == NULL)
                 ele = createStringObjectFromLongLong(vlong);
             else
@@ -1126,7 +1092,6 @@ void zsetConvert(robj *zobj, int encoding) {
 
             /* Has incremented refcount since it was just created. */
             node = zslInsert(zs->zsl,score,ele);
-            serverAssertWithInfo(NULL,zobj,dictAdd(zs->dict,ele,&node->score) == DICT_OK);
             incrRefCount(ele); /* Added to dictionary. */
             zzlNext(zl,&eptr,&sptr);
         }
@@ -1138,7 +1103,7 @@ void zsetConvert(robj *zobj, int encoding) {
         unsigned char *zl = ziplistNew();
 
         if (encoding != OBJ_ENCODING_ZIPLIST)
-            serverPanic("Unknown target encoding");
+            printf("Unknown target encoding");
 
         /* Approach similar to zslFree(), since we want to free the skiplist at
          * the same time as creating the ziplist. */
@@ -1162,7 +1127,7 @@ void zsetConvert(robj *zobj, int encoding) {
         zobj->ptr = zl;
         zobj->encoding = OBJ_ENCODING_ZIPLIST;
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 }
 
@@ -1193,7 +1158,7 @@ int zsetScore(robj *zobj, robj *member, double *score) {
         if (de == NULL) return C_ERR;
         *score = *(double*)dictGetVal(de);
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
     return C_OK;
 }
@@ -1359,7 +1324,6 @@ void zaddGenericCommand(client *c, int flags) {
                  * delete the key object from the skiplist, since the
                  * dictionary still has a reference to it. */
                 if (score != curscore) {
-                    serverAssertWithInfo(c,curobj,zslDelete(zs->zsl,curscore,curobj));
                     znode = zslInsert(zs->zsl,score,curobj);
                     incrRefCount(curobj); /* Re-inserted in skiplist. */
                     dictGetVal(de) = &znode->score; /* Update score ptr. */
@@ -1370,14 +1334,13 @@ void zaddGenericCommand(client *c, int flags) {
             } else if (!xx) {
                 znode = zslInsert(zs->zsl,score,ele);
                 incrRefCount(ele); /* Inserted in skiplist. */
-                serverAssertWithInfo(c,NULL,dictAdd(zs->dict,ele,&znode->score) == DICT_OK);
                 incrRefCount(ele); /* Added to dictionary. */
                 server.dirty++;
                 added++;
                 processed++;
             }
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     }
 
@@ -1395,8 +1358,6 @@ cleanup:
     zfree(scores);
     if (added || updated) {
         signalModifiedKey(c->db,key);
-        notifyKeyspaceEvent(NOTIFY_ZSET,
-            incr ? "zincr" : "zadd", key, c->db->id);
     }
 }
 
@@ -1442,7 +1403,6 @@ void zremCommand(client *c) {
 
                 /* Delete from the skiplist */
                 score = *(double*)dictGetVal(de);
-                serverAssertWithInfo(c,c->argv[j],zslDelete(zs->zsl,score,c->argv[j]));
 
                 /* Delete from the hash table */
                 dictDelete(zs->dict,c->argv[j]);
@@ -1455,13 +1415,10 @@ void zremCommand(client *c) {
             }
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     if (deleted) {
-        notifyKeyspaceEvent(NOTIFY_ZSET,"zrem",key,c->db->id);
-        if (keyremoved)
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",key,c->db->id);
         signalModifiedKey(c->db,key);
         server.dirty += deleted;
     }
@@ -1554,16 +1511,13 @@ void zremrangeGenericCommand(client *c, int rangetype) {
             keyremoved = 1;
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     /* Step 4: Notifications and reply. */
     if (deleted) {
         char *event[3] = {"zremrangebyrank","zremrangebyscore","zremrangebylex"};
         signalModifiedKey(c->db,key);
-        notifyKeyspaceEvent(NOTIFY_ZSET,event[rangetype],key,c->db->id);
-        if (keyremoved)
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",key,c->db->id);
     }
     server.dirty += deleted;
     addReplyLongLong(c,deleted);
@@ -1672,10 +1626,10 @@ void zuiInitIterator(zsetopsrc *op) {
             it->sl.zs = op->subject->ptr;
             it->sl.node = it->sl.zs->zsl->header->level[0].forward;
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     } else {
-        serverPanic("Unsupported type");
+        printf("Unsupported type");
     }
 }
 
@@ -1699,10 +1653,10 @@ void zuiClearIterator(zsetopsrc *op) {
         } else if (op->encoding == OBJ_ENCODING_SKIPLIST) {
             UNUSED(it); /* skip */
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     } else {
-        serverPanic("Unsupported type");
+        printf("Unsupported type");
     }
 }
 
@@ -1717,7 +1671,7 @@ int zuiLength(zsetopsrc *op) {
             dict *ht = op->subject->ptr;
             return dictSize(ht);
         } else {
-            serverPanic("Unknown set encoding");
+            printf("Unknown set encoding");
         }
     } else if (op->type == OBJ_ZSET) {
         if (op->encoding == OBJ_ENCODING_ZIPLIST) {
@@ -1726,10 +1680,10 @@ int zuiLength(zsetopsrc *op) {
             zset *zs = op->subject->ptr;
             return zs->zsl->length;
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     } else {
-        serverPanic("Unsupported type");
+        printf("Unsupported type");
     }
 }
 
@@ -1766,7 +1720,7 @@ int zuiNext(zsetopsrc *op, zsetopval *val) {
             /* Move to next element. */
             it->ht.de = dictNext(it->ht.di);
         } else {
-            serverPanic("Unknown set encoding");
+            printf("Unknown set encoding");
         }
     } else if (op->type == OBJ_ZSET) {
         iterzset *it = &op->iter.zset;
@@ -1774,7 +1728,6 @@ int zuiNext(zsetopsrc *op, zsetopval *val) {
             /* No need to check both, but better be explicit. */
             if (it->zl.eptr == NULL || it->zl.sptr == NULL)
                 return 0;
-            serverAssert(ziplistGet(it->zl.eptr,&val->estr,&val->elen,&val->ell));
             val->score = zzlGetScore(it->zl.sptr);
 
             /* Move to next element. */
@@ -1788,10 +1741,10 @@ int zuiNext(zsetopsrc *op, zsetopval *val) {
             /* Move to next element. */
             it->sl.node = it->sl.node->level[0].forward;
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     } else {
-        serverPanic("Unsupported type");
+        printf("Unsupported type");
     }
     return 1;
 }
@@ -1808,7 +1761,7 @@ int zuiLongLongFromValue(zsetopval *val) {
                 if (string2ll(val->ele->ptr,sdslen(val->ele->ptr),&val->ell))
                     val->flags |= OPVAL_VALID_LL;
             } else {
-                serverPanic("Unsupported element encoding");
+                printf("Unsupported element encoding");
             }
         } else if (val->estr != NULL) {
             if (string2ll((char*)val->estr,val->elen,&val->ell))
@@ -1843,7 +1796,7 @@ int zuiBufferFromValue(zsetopval *val) {
                 val->elen = sdslen(val->ele->ptr);
                 val->estr = val->ele->ptr;
             } else {
-                serverPanic("Unsupported element encoding");
+                printf("Unsupported element encoding");
             }
         } else {
             val->elen = ll2string((char*)val->_buf,sizeof(val->_buf),val->ell);
@@ -1879,7 +1832,7 @@ int zuiFind(zsetopsrc *op, zsetopval *val, double *score) {
                 return 0;
             }
         } else {
-            serverPanic("Unknown set encoding");
+            printf("Unknown set encoding");
         }
     } else if (op->type == OBJ_ZSET) {
         zuiObjectFromValue(val);
@@ -1901,10 +1854,10 @@ int zuiFind(zsetopsrc *op, zsetopval *val, double *score) {
                 return 0;
             }
         } else {
-            serverPanic("Unknown sorted set encoding");
+            printf("Unknown sorted set encoding");
         }
     } else {
-        serverPanic("Unsupported type");
+        printf("Unsupported type");
     }
 }
 
@@ -1930,7 +1883,7 @@ inline static void zunionInterAggregate(double *target, double val, int aggregat
         *target = val > *target ? val : *target;
     } else {
         /* safety net */
-        serverPanic("Unknown ZUNION/INTER aggregate type");
+        printf("Unknown ZUNION/INTER aggregate type");
     }
 }
 
@@ -2145,7 +2098,7 @@ void zunionInterGenericCommand(client *c, robj *dstkey, int op) {
         /* We can free the accumulator dictionary now. */
         dictRelease(accumulator);
     } else {
-        serverPanic("Unknown operator");
+        printf("Unknown operator");
     }
 
     if (dbDelete(c->db,dstkey))
@@ -2155,17 +2108,12 @@ void zunionInterGenericCommand(client *c, robj *dstkey, int op) {
         dbAdd(c->db,dstkey,dstobj);
         addReplyLongLong(c,zsetLength(dstobj));
         signalModifiedKey(c->db,dstkey);
-        notifyKeyspaceEvent(NOTIFY_ZSET,
-            (op == SET_OP_UNION) ? "zunionstore" : "zinterstore",
-            dstkey,c->db->id);
         server.dirty++;
     } else {
         decrRefCount(dstobj);
         addReply(c,shared.czero);
         if (touched) {
             signalModifiedKey(c->db,dstkey);
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",dstkey,c->db->id);
-            server.dirty++;
         }
     }
     zfree(src);
@@ -2231,12 +2179,9 @@ void zrangeGenericCommand(client *c, int reverse) {
         else
             eptr = ziplistIndex(zl,2*start);
 
-        serverAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
 
         while (rangelen--) {
-            serverAssertWithInfo(c,zobj,eptr != NULL && sptr != NULL);
-            serverAssertWithInfo(c,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
             if (vstr == NULL)
                 addReplyBulkLongLong(c,vlong);
             else
@@ -2269,7 +2214,6 @@ void zrangeGenericCommand(client *c, int reverse) {
         }
 
         while(rangelen--) {
-            serverAssertWithInfo(c,zobj,ln != NULL);
             ele = ln->obj;
             addReplyBulk(c,ele);
             if (withscores)
@@ -2277,7 +2221,7 @@ void zrangeGenericCommand(client *c, int reverse) {
             ln = reverse ? ln->backward : ln->level[0].forward;
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 }
 
@@ -2361,7 +2305,6 @@ void genericZrangebyscoreCommand(client *c, int reverse) {
         }
 
         /* Get score pointer for the first element. */
-        serverAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
 
         /* We don't know in advance how many matching elements there are in the
@@ -2390,7 +2333,6 @@ void genericZrangebyscoreCommand(client *c, int reverse) {
             }
 
             /* We know the element exists, so ziplistGet should always succeed */
-            serverAssertWithInfo(c,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
 
             rangelen++;
             if (vstr == NULL) {
@@ -2466,7 +2408,7 @@ void genericZrangebyscoreCommand(client *c, int reverse) {
             }
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     if (withscores) {
@@ -2517,7 +2459,6 @@ void zcountCommand(client *c) {
         /* First element is in range */
         sptr = ziplistNext(zl,eptr);
         score = zzlGetScore(sptr);
-        serverAssertWithInfo(c,zobj,zslValueLteMax(score,&range));
 
         /* Iterate over elements in range */
         while (eptr) {
@@ -2551,11 +2492,11 @@ void zcountCommand(client *c) {
             /* Use rank of last element, if any, to determine the actual count */
             if (zn != NULL) {
                 rank = zslGetRank(zsl, zn->score, zn->obj);
-                count -= (zsl->length - rank);
+                count -= (zsl->length - rank);s
             }
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     addReplyLongLong(c, count);
@@ -2595,9 +2536,8 @@ void zlexcountCommand(client *c) {
             return;
         }
 
-        /* First element is in range */
+        /* First element is in range */s
         sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(c,zobj,zzlLexValueLteMax(eptr,&range));
 
         /* Iterate over elements in range */
         while (eptr) {
@@ -2633,7 +2573,7 @@ void zlexcountCommand(client *c) {
             }
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     zslFreeLexRange(&range);
@@ -2713,7 +2653,6 @@ void genericZrangebylexCommand(client *c, int reverse) {
         }
 
         /* Get score pointer for the first element. */
-        serverAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
 
         /* We don't know in advance how many matching elements there are in the
@@ -2741,7 +2680,6 @@ void genericZrangebylexCommand(client *c, int reverse) {
 
             /* We know the element exists, so ziplistGet should always
              * succeed. */
-            serverAssertWithInfo(c,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
 
             rangelen++;
             if (vstr == NULL) {
@@ -2810,7 +2748,7 @@ void genericZrangebylexCommand(client *c, int reverse) {
             }
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 
     zslFreeLexRange(&range);
@@ -2861,16 +2799,12 @@ void zrankGenericCommand(client *c, int reverse) {
         checkType(c,zobj,OBJ_ZSET)) return;
     llen = zsetLength(zobj);
 
-    serverAssertWithInfo(c,ele,sdsEncodedObject(ele));
-
-    if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
+    if (zobj->encoding == REDIS_ENCODING_ZIPLIST) {
         unsigned char *zl = zobj->ptr;
         unsigned char *eptr, *sptr;
 
         eptr = ziplistIndex(zl,0);
-        serverAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(c,zobj,sptr != NULL);
 
         rank = 1;
         while(eptr != NULL) {
@@ -2899,7 +2833,6 @@ void zrankGenericCommand(client *c, int reverse) {
         if (de != NULL) {
             score = *(double*)dictGetVal(de);
             rank = zslGetRank(zsl,score,ele);
-            serverAssertWithInfo(c,ele,rank); /* Existing elements always have a rank. */
             if (reverse)
                 addReplyLongLong(c,llen-rank);
             else
@@ -2908,7 +2841,7 @@ void zrankGenericCommand(client *c, int reverse) {
             addReply(c,shared.nullbulk);
         }
     } else {
-        serverPanic("Unknown sorted set encoding");
+        printf("Unknown sorted set encoding");
     }
 }
 

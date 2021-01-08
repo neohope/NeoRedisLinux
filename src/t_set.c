@@ -74,13 +74,11 @@ int setTypeAdd(robj *subject, robj *value) {
 
             /* The set *was* an intset and this value is not integer
              * encodable, so dictAdd should always work. */
-            serverAssertWithInfo(NULL,value,
-                                dictAdd(subject->ptr,value,NULL) == DICT_OK);
             incrRefCount(value);
             return 1;
         }
     } else {
-        serverPanic("Unknown set encoding");
+		printf("Unknown set encoding");
     }
     return 0;
 }
@@ -99,7 +97,7 @@ int setTypeRemove(robj *setobj, robj *value) {
             if (success) return 1;
         }
     } else {
-        serverPanic("Unknown set encoding");
+		printf("Unknown set encoding");
     }
     return 0;
 }
@@ -113,7 +111,7 @@ int setTypeIsMember(robj *subject, robj *value) {
             return intsetFind((intset*)subject->ptr,llval);
         }
     } else {
-        serverPanic("Unknown set encoding");
+		printf("Unknown set encoding");
     }
     return 0;
 }
@@ -127,7 +125,7 @@ setTypeIterator *setTypeInitIterator(robj *subject) {
     } else if (si->encoding == OBJ_ENCODING_INTSET) {
         si->ii = 0;
     } else {
-        serverPanic("Unknown set encoding");
+		printf("Unknown set encoding");
     }
     return si;
 }
@@ -164,7 +162,7 @@ int setTypeNext(setTypeIterator *si, robj **objele, int64_t *llele) {
             return -1;
         *objele = NULL; /* Not needed. Defensive. */
     } else {
-        serverPanic("Wrong set encoding in setTypeNext");
+        printf("Wrong set encoding in setTypeNext");
     }
     return si->encoding;
 }
@@ -190,7 +188,7 @@ robj *setTypeNextObject(setTypeIterator *si) {
             incrRefCount(objele);
             return objele;
         default:
-            serverPanic("Unsupported encoding");
+			printf("Unsupported encoding");
     }
     return NULL; /* just to suppress warnings */
 }
@@ -221,7 +219,7 @@ int setTypeRandomElement(robj *setobj, robj **objele, int64_t *llele) {
         *llele = intsetRandom(setobj->ptr);
         *objele = NULL; /* Not needed. Defensive. */
     } else {
-        serverPanic("Unknown set encoding");
+        printf("Unknown set encoding");
     }
     return setobj->encoding;
 }
@@ -232,7 +230,7 @@ unsigned long setTypeSize(robj *subject) {
     } else if (subject->encoding == OBJ_ENCODING_INTSET) {
         return intsetLen((intset*)subject->ptr);
     } else {
-        serverPanic("Unknown set encoding");
+        printf("Unknown set encoding");
     }
 }
 
@@ -241,8 +239,6 @@ unsigned long setTypeSize(robj *subject) {
  * set. */
 void setTypeConvert(robj *setobj, int enc) {
     setTypeIterator *si;
-    serverAssertWithInfo(NULL,setobj,setobj->type == OBJ_SET &&
-                             setobj->encoding == OBJ_ENCODING_INTSET);
 
     if (enc == OBJ_ENCODING_HT) {
         int64_t intele;
@@ -256,8 +252,6 @@ void setTypeConvert(robj *setobj, int enc) {
         si = setTypeInitIterator(setobj);
         while (setTypeNext(si,&element,&intele) != -1) {
             element = createStringObjectFromLongLong(intele);
-            serverAssertWithInfo(NULL,element,
-                                dictAdd(d,element,NULL) == DICT_OK);
         }
         setTypeReleaseIterator(si);
 
@@ -265,7 +259,7 @@ void setTypeConvert(robj *setobj, int enc) {
         zfree(setobj->ptr);
         setobj->ptr = d;
     } else {
-        serverPanic("Unsupported set conversion");
+		printf("Unsupported set conversion");
     }
 }
 
@@ -290,7 +284,6 @@ void saddCommand(client *c) {
     }
     if (added) {
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_SET,"sadd",c->argv[1],c->db->id);
     }
     server.dirty += added;
     addReplyLongLong(c,added);
@@ -315,10 +308,6 @@ void sremCommand(client *c) {
     }
     if (deleted) {
         signalModifiedKey(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_SET,"srem",c->argv[1],c->db->id);
-        if (keyremoved)
-            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],
-                                c->db->id);
         server.dirty += deleted;
     }
     addReplyLongLong(c,deleted);
@@ -352,12 +341,10 @@ void smoveCommand(client *c) {
         addReply(c,shared.czero);
         return;
     }
-    notifyKeyspaceEvent(NOTIFY_SET,"srem",c->argv[1],c->db->id);
 
     /* Remove the src set from the database when empty */
     if (setTypeSize(srcset) == 0) {
         dbDelete(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
     }
 
     /* Create the destination set when it doesn't exist */
@@ -373,7 +360,6 @@ void smoveCommand(client *c) {
     /* An extra key has changed when ele was successfully added to dstset */
     if (setTypeAdd(dstset,ele)) {
         server.dirty++;
-        notifyKeyspaceEvent(NOTIFY_SET,"sadd",c->argv[2],c->db->id);
     }
     addReply(c,shared.cone);
 }
@@ -589,8 +575,6 @@ void spopCommand(client *c) {
         setTypeRemove(set,ele);
     }
 
-    notifyKeyspaceEvent(NOTIFY_SET,"spop",c->argv[1],c->db->id);
-
     /* Replicate/AOF this command as an SREM operation */
     aux = createStringObject("SREM",4);
     rewriteClientCommandVector(c,3,aux,c->argv[1],ele);
@@ -603,7 +587,6 @@ void spopCommand(client *c) {
     /* Delete the set if it's empty */
     if (setTypeSize(set) == 0) {
         dbDelete(c->db,c->argv[1]);
-        notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
     }
 
     /* Set has been modified */
@@ -699,10 +682,8 @@ void srandmemberWithCountCommand(client *c) {
             } else {
                 retval = dictAdd(d,dupStringObject(ele),NULL);
             }
-            serverAssert(retval == DICT_OK);
         }
         setTypeReleaseIterator(si);
-        serverAssert(dictSize(d) == size);
 
         /* Remove random elements to reach the right count. */
         while(size > count) {
@@ -907,14 +888,9 @@ void sinterGenericCommand(client *c, robj **setkeys,
         if (setTypeSize(dstset) > 0) {
             dbAdd(c->db,dstkey,dstset);
             addReplyLongLong(c,setTypeSize(dstset));
-            notifyKeyspaceEvent(NOTIFY_SET,"sinterstore",
-                dstkey,c->db->id);
         } else {
             decrRefCount(dstset);
             addReply(c,shared.czero);
-            if (deleted)
-                notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
-                    dstkey,c->db->id);
         }
         signalModifiedKey(c->db,dstkey);
         server.dirty++;
@@ -1079,15 +1055,9 @@ void sunionDiffGenericCommand(client *c, robj **setkeys, int setnum,
         if (setTypeSize(dstset) > 0) {
             dbAdd(c->db,dstkey,dstset);
             addReplyLongLong(c,setTypeSize(dstset));
-            notifyKeyspaceEvent(NOTIFY_SET,
-                op == SET_OP_UNION ? "sunionstore" : "sdiffstore",
-                dstkey,c->db->id);
         } else {
             decrRefCount(dstset);
             addReply(c,shared.czero);
-            if (deleted)
-                notifyKeyspaceEvent(NOTIFY_GENERIC,"del",
-                    dstkey,c->db->id);
         }
         signalModifiedKey(c->db,dstkey);
         server.dirty++;

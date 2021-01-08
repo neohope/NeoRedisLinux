@@ -45,8 +45,4 @@ int d2string(char *buf, size_t len, double value);
 sds getAbsolutePath(char *filename);
 int pathIsBaseName(char *path);
 
-#ifdef REDIS_TEST
-int utilTest(int argc, char **argv);
-#endif
-
 #endif
