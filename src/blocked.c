@@ -112,7 +112,6 @@ void processUnblockedClients(void) {
 
     while (listLength(server.unblocked_clients)) {
         ln = listFirst(server.unblocked_clients);
-        serverAssert(ln != NULL);
         c = ln->value;
         listDelNode(server.unblocked_clients,ln);
         c->flags &= ~CLIENT_UNBLOCKED;
@@ -135,9 +134,8 @@ void unblockClient(client *c) {
     if (c->btype == BLOCKED_LIST) {
         unblockClientWaitingData(c);
     } else if (c->btype == BLOCKED_WAIT) {
-        unblockClientWaitingReplicas(c);
     } else {
-        serverPanic("Unknown btype in unblockClient().");
+        printf("Unknown btype in unblockClient().");
     }
     /* Clear the flags, and put the client in the unblocked list so that
      * we'll process new commands in its query buffer ASAP. */
@@ -158,9 +156,8 @@ void replyToBlockedClientTimedOut(client *c) {
     if (c->btype == BLOCKED_LIST) {
         addReply(c,shared.nullmultibulk);
     } else if (c->btype == BLOCKED_WAIT) {
-        addReplyLongLong(c,replicationCountAcksByOffset(c->bpop.reploffset));
     } else {
-        serverPanic("Unknown btype in replyToBlockedClientTimedOut().");
+        printf("Unknown btype in replyToBlockedClientTimedOut().");
     }
 }
 

@@ -84,7 +84,6 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
         return;
     }
     setKey(c->db,key,val);
-    server.dirty++;
     if (expire) setExpire(c->db,key,mstime()+milliseconds);
     addReply(c, ok_reply ? ok_reply : shared.ok);
 }
@@ -174,7 +173,6 @@ void getsetCommand(client *c) {
     if (getGenericCommand(c) == C_ERR) return;
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setKey(c->db,c->argv[1],c->argv[2]);
-    server.dirty++;
 }
 
 void setrangeCommand(client *c) {
@@ -230,7 +228,6 @@ void setrangeCommand(client *c) {
         o->ptr = sdsgrowzero(o->ptr,offset+sdslen(value));
         memcpy((char*)o->ptr+offset,value,sdslen(value));
         signalModifiedKey(c->db,c->argv[1]);
-        server.dirty++;
     }
     addReplyLongLong(c,sdslen(o->ptr));
 }
@@ -319,7 +316,6 @@ void msetGenericCommand(client *c, int nx) {
         c->argv[j+1] = tryObjectEncoding(c->argv[j+1]);
         setKey(c->db,c->argv[j],c->argv[j+1]);
     }
-    server.dirty += (c->argc-1)/2;
     addReply(c, nx ? shared.cone : shared.ok);
 }
 
@@ -362,7 +358,6 @@ void incrDecrCommand(client *c, long long incr) {
         }
     }
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
     addReply(c,shared.colon);
     addReply(c,new);
     addReply(c,shared.crlf);
@@ -411,7 +406,6 @@ void incrbyfloatCommand(client *c) {
     else
         dbAdd(c->db,c->argv[1],new);
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
     addReplyBulk(c,new);
 
     /* Always replicate INCRBYFLOAT as a SET command with the final value
@@ -451,7 +445,6 @@ void appendCommand(client *c) {
         totlen = sdslen(o->ptr);
     }
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
     addReplyLongLong(c,totlen);
 }
 

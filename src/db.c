@@ -28,7 +28,6 @@
  */
 
 #include "server.h"
-#include "cluster.h"
 
 #include <signal.h>
 #include <ctype.h>
@@ -77,11 +76,6 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
     robj *val;
 
     if (expireIfNeeded(db,key) == 1) {
-        /* Key expired. If we are in the context of a master, expireIfNeeded()
-         * returns 0 only when the key does not exist at all, so it's safe
-         * to return NULL ASAP. */
-        if (server.masterhost == NULL) return NULL;
-
         /* However if we are in the context of a slave, expireIfNeeded() will
          * not really try to expire the key, it only returns information
          * about the "logical" status of the key: key expiring is up to the
@@ -95,7 +89,6 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
          *
          * Notably this covers GETs when slaves are used to scale reads. */
         if (server.current_client &&
-            server.current_client != server.master &&
             server.current_client->cmd &&
             server.current_client->cmd->flags & CMD_READONLY)
         {
@@ -294,7 +287,6 @@ void signalFlushedDb(int dbid) {
  *----------------------------------------------------------------------------*/
 
 void flushdbCommand(client *c) {
-    server.dirty += dictSize(c->db->dict);
     signalFlushedDb(c->db->id);
     dictEmpty(c->db->dict,NULL);
     dictEmpty(c->db->expires,NULL);
@@ -303,10 +295,7 @@ void flushdbCommand(client *c) {
 
 void flushallCommand(client *c) {
     signalFlushedDb(-1);
-    server.dirty += emptyDb(NULL);
     addReply(c,shared.ok);
-
-    server.dirty++;
 }
 
 void delCommand(client *c) {
@@ -316,7 +305,6 @@ void delCommand(client *c) {
         expireIfNeeded(c->db,c->argv[j]);
         if (dbDelete(c->db,c->argv[j])) {
             signalModifiedKey(c->db,c->argv[j]);
-            server.dirty++;
             deleted++;
         }
     }
@@ -413,7 +401,7 @@ void scanCallback(void *privdata, const dictEntry *de) {
         incrRefCount(key);
         val = createStringObjectFromLongDouble(*(double*)dictGetVal(de),0);
     } else {
-        serverPanic("Type not handled in SCAN callback.");
+        printf("Type not handled in SCAN callback.");
     }
 
     listAddNodeTail(keys, key);
@@ -578,7 +566,7 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
                 char buf[LONG_STR_SIZE];
                 int len;
 
-                serverAssert(kobj->encoding == OBJ_ENCODING_INT);
+                printf(kobj->encoding == OBJ_ENCODING_INT);
                 len = ll2string(buf,sizeof(buf),(long)kobj->ptr);
                 if (!stringmatchlen(pat, patlen, buf, len, 0)) filter = 1;
             }
@@ -637,7 +625,6 @@ void dbsizeCommand(client *c) {
 }
 
 void lastsaveCommand(client *c) {
-    addReplyLongLong(c,server.lastsave);
 }
 
 void typeCommand(client *c) {
@@ -682,7 +669,7 @@ void shutdownCommand(client *c) {
      * with half-read data).
      *
      * Also when in Sentinel mode clear the SAVE flag and force NOSAVE. */
-    if (server.loading || server.sentinel_mode)
+    if (server.loading)
         flags = (flags & ~SHUTDOWN_SAVE) | SHUTDOWN_NOSAVE;
     if (prepareForShutdown(flags) == C_OK) exit(0);
     addReplyError(c,"Errors trying to SHUTDOWN. Check logs.");
@@ -722,7 +709,6 @@ void renameGenericCommand(client *c, int nx) {
     dbDelete(c->db,c->argv[1]);
     signalModifiedKey(c->db,c->argv[1]);
     signalModifiedKey(c->db,c->argv[2]);
-    server.dirty++;
     addReply(c,nx ? shared.cone : shared.ok);
 }
 
@@ -780,7 +766,6 @@ void moveCommand(client *c) {
 
     /* OK! key moved, free the entry in the source DB */
     dbDelete(src,c->argv[1]);
-    server.dirty++;
     addReply(c,shared.cone);
 }
 
@@ -898,7 +883,6 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
      * (possibly in the past) and wait for an explicit DEL from the master. */
     if (when <= mstime() && !server.loading) {
         robj *aux;
-        server.dirty++;
 
         /* Replicate/AOF this as an explicit DEL. */
         aux = createStringObject("DEL",3);
@@ -911,7 +895,6 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         setExpire(c->db,key,when);
         addReply(c,shared.cone);
         signalModifiedKey(c->db,key);
-        server.dirty++;
         return;
     }
 }
@@ -966,7 +949,6 @@ void persistCommand(client *c) {
     if (lookupKeyWrite(c->db,c->argv[1])) {
         if (removeExpire(c->db,c->argv[1])) {
             addReply(c,shared.cone);
-            server.dirty++;
         } else {
             addReply(c,shared.czero);
         }
@@ -1001,7 +983,6 @@ int *getKeysUsingCommandTable(struct redisCommand *cmd,robj **argv, int argc, in
     if (last < 0) last = argc+last;
     keys = zmalloc(sizeof(int)*((last - cmd->firstkey)+1));
     for (j = cmd->firstkey; j <= last; j += cmd->keystep) {
-        serverAssert(j < argc);
         keys[i++] = j;
     }
     *numkeys = i;

@@ -29,7 +29,6 @@
  */
 
 #include "fmacros.h"
-#include "version.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -53,6 +52,8 @@
 #include "help.h"
 #include "anet.h"
 #include "ae.h"
+
+#define REDIS_VERSION "3.2.13"
 
 #define UNUSED(V) ((void) V)
 
@@ -82,8 +83,8 @@ static struct config {
     char *hostip;
     int hostport;
     char *hostsocket;
-    PORT_LONG repeat;
-    PORT_LONG interval;
+    long repeat;
+    long interval;
     int dbnum;
     int interactive;
     int shutdown;
@@ -138,8 +139,6 @@ static long long mstime(void) {
 }
 
 static void cliRefreshPrompt(void) {
-    if (config.eval_ldb) return;
-
     sds prompt = sdsempty();
     if (config.hostsocket != NULL) {
         prompt = sdscatfmt(prompt,"redis %s",config.hostsocket);
@@ -669,8 +668,7 @@ static int cliSendCommand(int argc, char **argv, int repeat) {
     size_t *argvlen;
     int j, output_raw;
 
-    if (!config.eval_ldb && /* In debugging mode, let's pass "help" to Redis. */
-        (!strcasecmp(command,"help") || !strcasecmp(command,"?"))) {
+    if ((!strcasecmp(command,"help") || !strcasecmp(command,"?"))) {
         cliOutputHelp(--argc, ++argv);
         return REDIS_OK;
     }
@@ -949,6 +947,16 @@ static int issueCommandRepeat(int argc, char **argv, long repeat) {
 
 static int issueCommand(int argc, char **argv) {
     return issueCommandRepeat(argc, argv, config.repeat);
+}
+
+/* Split the user provided command into multiple SDS arguments.
+ * This function normally uses sdssplitargs() from sds.c which is able
+ * to understand "quoted strings", escapes and so forth. However when
+ * we are in Lua debugging mode and the "eval" command is used, we want
+ * the remaining Lua script (after "e " or "eval ") to be passed verbatim
+ * as a single big argument. */
+static sds *cliSplitArgs(char *line, int *argc) {
+    return sdssplitargs(line,argc);
 }
 
 static void repl(void) {

@@ -163,8 +163,6 @@ robj *createStringObjectFromLongDouble(long double value, int humanfriendly) {
 robj *dupStringObject(robj *o) {
     robj *d;
 
-    serverAssert(o->type == OBJ_STRING);
-
     switch(o->encoding) {
     case OBJ_ENCODING_RAW:
         return createRawStringObject(o->ptr,sdslen(o->ptr));
@@ -244,7 +242,7 @@ void freeListObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_QUICKLIST) {
         quicklistRelease(o->ptr);
     } else {
-        serverPanic("Unknown list encoding type");
+        printf("Unknown list encoding type");
     }
 }
 
@@ -297,7 +295,7 @@ void incrRefCount(robj *o) {
 }
 
 void decrRefCount(robj *o) {
-    if (o->refcount <= 0) serverPanic("decrRefCount against refcount <= 0");
+    if (o->refcount <= 0) printf("decrRefCount against refcount <= 0");
     if (o->refcount == 1) {
         switch(o->type) {
         case OBJ_STRING: freeStringObject(o); break;

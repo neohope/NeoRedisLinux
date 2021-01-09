@@ -29,7 +29,6 @@
  */
 
 #include "server.h"
-#include "cluster.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -66,11 +65,52 @@ configEnum syslog_facility_enum[] = {
     {NULL, 0}
 };
 
+configEnum loglevel_enum[] = {
+        {"debug", LL_DEBUG},
+        {"verbose", LL_VERBOSE},
+        {"notice", LL_NOTICE},
+        {"warning", LL_WARNING},
+        {NULL,0}
+};
 
 /* Output buffer limits presets. */
 clientBufferLimitsConfig clientBufferLimitsDefaults[CLIENT_TYPE_OBUF_COUNT] = {
     {0, 0, 0} /* normal */
 };
+
+/*-----------------------------------------------------------------------------
+ * Enum access functions
+ *----------------------------------------------------------------------------*/
+
+/* Get enum value from name. If there is no match INT_MIN is returned. */
+int configEnumGetValue(configEnum *ce, char *name) {
+    while(ce->name != NULL) {
+        if (!strcasecmp(ce->name,name)) return ce->val;
+        ce++;
+    }
+    return INT_MIN;
+}
+
+/* Get enum name from value. If no match is found NULL is returned. */
+const char *configEnumGetName(configEnum *ce, int val) {
+    while(ce->name != NULL) {
+        if (ce->val == val) return ce->name;
+        ce++;
+    }
+    return NULL;
+}
+
+/* Wrapper for configEnumGetName() returning "unknown" insetad of NULL if
+ * there is no match. */
+const char *configEnumGetNameOrUnknown(configEnum *ce, int val) {
+    const char *name = configEnumGetName(ce,val);
+    return name ? name : "unknown";
+}
+
+/* Used for INFO generation. */
+const char *evictPolicyToString(void) {
+    return configEnumGetNameOrUnknown(maxmemory_policy_enum,server.maxmemory_policy);
+}
 
 /*-----------------------------------------------------------------------------
  * Config file parsing
@@ -289,7 +329,6 @@ void loadServerConfigFromString(char *config) {
             /* If the target command name is the empty string we just
              * remove it from the command table. */
             retval = dictDelete(server.commands, argv[1]);
-            serverAssert(retval == DICT_OK);
 
             /* Otherwise we re-add the command under a different name. */
             if (sdslen(argv[2]) != 0) {
@@ -322,7 +361,7 @@ void loadServerConfigFromString(char *config) {
             unsigned long long hard, soft;
             int soft_seconds;
 
-            if (class == -1 || class == CLIENT_TYPE_MASTER) {
+            if (class == -1) {
                 err = "Unrecognized client limit class: the user specified "
                 "an invalid one, or 'master' which has no buffer limits.";
                 goto loaderr;
@@ -337,19 +376,6 @@ void loadServerConfigFromString(char *config) {
             server.client_obuf_limits[class].hard_limit_bytes = hard;
             server.client_obuf_limits[class].soft_limit_bytes = soft;
             server.client_obuf_limits[class].soft_limit_seconds = soft_seconds;
-        } else if (!strcasecmp(argv[0],"stop-writes-on-bgsave-error") &&
-                   argc == 2) {
-            if ((server.stop_writes_on_bgsave_err = yesnotoi(argv[1])) == -1) {
-                err = "argument must be 'yes' or 'no'"; goto loaderr;
-            }
-        } else if (!strcasecmp(argv[0],"notify-keyspace-events") && argc == 2) {
-            int flags = keyspaceEventsStringToFlags(argv[1]);
-
-            if (flags == -1) {
-                err = "Invalid event class character. Use 'g$lshzxeA'.";
-                goto loaderr;
-            }
-            server.notify_keyspace_events = flags;
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }
@@ -442,8 +468,6 @@ void configSetCommand(client *c) {
     robj *o;
     long long ll;
     int err;
-    serverAssertWithInfo(c,c->argv[2],sdsEncodedObject(c->argv[2]));
-    serverAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
 
     if (0) { /* this starts the config_set macros else-if chain. */
@@ -536,7 +560,7 @@ void configSetCommand(client *c) {
 
             if ((j % 4) == 0) {
                 int class = getClientTypeByName(v[j]);
-                if (class == -1 || class == CLIENT_TYPE_MASTER) {
+                if (class == -1) {
                     sdsfreesplitres(v,vlen);
                     goto badfmt;
                 }
@@ -564,36 +588,11 @@ void configSetCommand(client *c) {
             server.client_obuf_limits[class].soft_limit_seconds = soft_seconds;
         }
         sdsfreesplitres(v,vlen);
-    } config_set_special_field("notify-keyspace-events") {
-        int flags = keyspaceEventsStringToFlags(o->ptr);
-
-        if (flags == -1) goto badfmt;
-        server.notify_keyspace_events = flags;
 
     /* Boolean fields.
      * config_set_bool_field(name,var). */
     } config_set_bool_field(
-      "repl-disable-tcp-nodelay",server.repl_disable_tcp_nodelay) {
-    } config_set_bool_field(
-      "repl-diskless-sync",server.repl_diskless_sync) {
-    } config_set_bool_field(
-      "cluster-require-full-coverage",server.cluster_require_full_coverage) {
-    } config_set_bool_field(
-      "aof-rewrite-incremental-fsync",server.aof_rewrite_incremental_fsync) {
-    } config_set_bool_field(
-      "aof-load-truncated",server.aof_load_truncated) {
-    } config_set_bool_field(
-      "slave-serve-stale-data",server.repl_serve_stale_data) {
-    } config_set_bool_field(
-      "slave-read-only",server.repl_slave_ro) {
-    } config_set_bool_field(
       "activerehashing",server.activerehashing) {
-    } config_set_bool_field(
-      "protected-mode",server.protected_mode) {
-    } config_set_bool_field(
-      "stop-writes-on-bgsave-error",server.stop_writes_on_bgsave_err) {
-    } config_set_bool_field(
-      "no-appendfsync-on-rewrite",server.aof_no_fsync_on_rewrite) {
 
     /* Numerical fields.
      * config_set_numerical_field(name,var,min,max) */
@@ -603,8 +602,6 @@ void configSetCommand(client *c) {
       "maxmemory-samples",server.maxmemory_samples,1,LLONG_MAX) {
     } config_set_numerical_field(
       "timeout",server.maxidletime,0,LONG_MAX) {
-    } config_set_numerical_field(
-      "auto-aof-rewrite-percentage",server.aof_rewrite_perc,0,LLONG_MAX){
     } config_set_numerical_field(
       "hash-max-ziplist-entries",server.hash_max_ziplist_entries,0,LLONG_MAX) {
     } config_set_numerical_field(
@@ -630,41 +627,11 @@ void configSetCommand(client *c) {
     } config_set_numerical_field(
       "latency-monitor-threshold",server.latency_monitor_threshold,0,LLONG_MAX){
     } config_set_numerical_field(
-      "repl-ping-slave-period",server.repl_ping_slave_period,1,LLONG_MAX) {
-    } config_set_numerical_field(
-      "repl-timeout",server.repl_timeout,1,LLONG_MAX) {
-    } config_set_numerical_field(
-      "repl-backlog-ttl",server.repl_backlog_time_limit,0,LLONG_MAX) {
-    } config_set_numerical_field(
-      "repl-diskless-sync-delay",server.repl_diskless_sync_delay,0,LLONG_MAX) {
-    } config_set_numerical_field(
-      "slave-priority",server.slave_priority,0,LLONG_MAX) {
-    } config_set_numerical_field(
-      "slave-announce-port",server.slave_announce_port,0,65535) {
-    } config_set_numerical_field(
-      "min-slaves-to-write",server.repl_min_slaves_to_write,0,LLONG_MAX) {
-        refreshGoodSlavesCount();
-    } config_set_numerical_field(
-      "min-slaves-max-lag",server.repl_min_slaves_max_lag,0,LLONG_MAX) {
-        refreshGoodSlavesCount();
-    } config_set_numerical_field(
-      "cluster-node-timeout",server.cluster_node_timeout,0,LLONG_MAX) {
-    } config_set_numerical_field(
-      "cluster-migration-barrier",server.cluster_migration_barrier,0,LLONG_MAX){
-    } config_set_numerical_field(
-      "cluster-slave-validity-factor",server.cluster_slave_validity_factor,0,LLONG_MAX) {
-    } config_set_numerical_field(
       "hz",server.hz,0,LLONG_MAX) {
         /* Hz is more an hint from the user, so we accept values out of range
          * but cap them to reasonable values. */
         if (server.hz < CONFIG_MIN_HZ) server.hz = CONFIG_MIN_HZ;
         if (server.hz > CONFIG_MAX_HZ) server.hz = CONFIG_MAX_HZ;
-    } config_set_numerical_field(
-      "watchdog-period",ll,0,LLONG_MAX) {
-        if (ll)
-            enableWatchdog(ll);
-        else
-            disableWatchdog();
 
     /* Memory fields.
      * config_set_memory_field(name,var) */
@@ -675,10 +642,6 @@ void configSetCommand(client *c) {
             }
             freeMemoryIfNeeded();
         }
-    } config_set_memory_field("repl-backlog-size",ll) {
-        resizeReplicationBacklog(ll);
-    } config_set_memory_field("auto-aof-rewrite-min-size",ll) {
-        server.aof_rewrite_min_size = ll;
 
     /* Enumeration fields.
      * config_set_enum_field(name,var,enum_var) */
@@ -686,8 +649,6 @@ void configSetCommand(client *c) {
       "loglevel",server.verbosity,loglevel_enum) {
     } config_set_enum_field(
       "maxmemory-policy",server.maxmemory_policy,maxmemory_policy_enum) {
-    } config_set_enum_field(
-      "appendfsync",server.aof_fsync,aof_fsync_enum) {
 
     /* Everyhing else is an error... */
     } config_set_else {
@@ -749,16 +710,12 @@ void configGetCommand(client *c) {
     char *pattern = o->ptr;
     char buf[128];
     int matches = 0;
-    serverAssertWithInfo(c,o,sdsEncodedObject(o));
 
     /* String values */
-    config_get_string_field("dbfilename",server.rdb_filename);
     config_get_string_field("requirepass",server.requirepass);
-    config_get_string_field("masterauth",server.masterauth);
     config_get_string_field("unixsocket",server.unixsocket);
     config_get_string_field("logfile",server.logfile);
     config_get_string_field("pidfile",server.pidfile);
-    config_get_string_field("slave-announce-ip",server.slave_announce_ip);
 
     /* Numerical values */
     config_get_numerical_field("maxmemory",server.maxmemory);
@@ -812,22 +769,7 @@ void configGetCommand(client *c) {
         addReplyBulkCString(c,buf);
         matches++;
     }
-    if (stringmatch(pattern,"save",1)) {
-        sds buf = sdsempty();
-        int j;
 
-        for (j = 0; j < server.saveparamslen; j++) {
-            buf = sdscatprintf(buf,"%jd %d",
-                    (intmax_t)server.saveparams[j].seconds,
-                    server.saveparams[j].changes);
-            if (j != server.saveparamslen-1)
-                buf = sdscatlen(buf," ",1);
-        }
-        addReplyBulkCString(c,"save");
-        addReplyBulkCString(c,buf);
-        sdsfree(buf);
-        matches++;
-    }
     if (stringmatch(pattern,"client-output-buffer-limit",1)) {
         sds buf = sdsempty();
         int j;
@@ -1146,23 +1088,6 @@ void rewriteConfigSyslogfacilityOption(struct rewriteConfigState *state) {
     rewriteConfigRewriteLine(state,option,line,force);
 }
 
-/* Rewrite the save option. */
-void rewriteConfigSaveOption(struct rewriteConfigState *state) {
-    int j;
-    sds line;
-
-    /* Note that if there are no save parameters at all, all the current
-     * config line with "save" will be detected as orphaned and deleted,
-     * resulting into no RDB persistence as expected. */
-    for (j = 0; j < server.saveparamslen; j++) {
-        line = sdscatprintf(sdsempty(),"save %ld %d",
-            (long) server.saveparams[j].seconds, server.saveparams[j].changes);
-        rewriteConfigRewriteLine(state,"save",line,1);
-    }
-    /* Mark "save" as processed in case server.saveparamslen is zero. */
-    rewriteConfigMarkAsProcessed(state,"save");
-}
-
 /* Rewrite the dir option, always using absolute paths.*/
 void rewriteConfigDirOption(struct rewriteConfigState *state) {
     char cwd[1024];
@@ -1172,20 +1097,6 @@ void rewriteConfigDirOption(struct rewriteConfigState *state) {
         return; /* no rewrite on error. */
     }
     rewriteConfigStringOption(state,"dir",cwd,NULL);
-}
-
-/* Rewrite the notify-keyspace-events option. */
-void rewriteConfigNotifykeyspaceeventsOption(struct rewriteConfigState *state) {
-    int force = server.notify_keyspace_events != 0;
-    char *option = "notify-keyspace-events";
-    sds line, flags;
-
-    flags = keyspaceEventsFlagsToString(server.notify_keyspace_events);
-    line = sdsnew(option);
-    line = sdscatlen(line, " ", 1);
-    line = sdscatrepr(line, flags, sdslen(flags));
-    sdsfree(flags);
-    rewriteConfigRewriteLine(state,option,line,force);
 }
 
 /* Rewrite the client-output-buffer-limit option. */
@@ -1390,17 +1301,14 @@ int rewriteConfig(char *path) {
     rewriteConfigYesNoOption(state,"syslog-enabled",server.syslog_enabled,CONFIG_DEFAULT_SYSLOG_ENABLED);
     rewriteConfigStringOption(state,"syslog-ident",server.syslog_ident,CONFIG_DEFAULT_SYSLOG_IDENT);
     rewriteConfigSyslogfacilityOption(state);
-    rewriteConfigSaveOption(state);
     rewriteConfigNumericalOption(state,"databases",server.dbnum,CONFIG_DEFAULT_DBNUM);
     rewriteConfigDirOption(state);
-    rewriteConfigSlaveofOption(state);
     rewriteConfigBytesOption(state,"maxmemory",server.maxmemory,CONFIG_DEFAULT_MAXMEMORY);
     rewriteConfigEnumOption(state,"maxmemory-policy",server.maxmemory_policy,maxmemory_policy_enum,CONFIG_DEFAULT_MAXMEMORY_POLICY);
     rewriteConfigNumericalOption(state,"maxmemory-samples",server.maxmemory_samples,CONFIG_DEFAULT_MAXMEMORY_SAMPLES);
     rewriteConfigNumericalOption(state,"slowlog-log-slower-than",server.slowlog_log_slower_than,CONFIG_DEFAULT_SLOWLOG_LOG_SLOWER_THAN);
     rewriteConfigNumericalOption(state,"latency-monitor-threshold",server.latency_monitor_threshold,CONFIG_DEFAULT_LATENCY_MONITOR_THRESHOLD);
     rewriteConfigNumericalOption(state,"slowlog-max-len",server.slowlog_max_len,CONFIG_DEFAULT_SLOWLOG_MAX_LEN);
-    rewriteConfigNotifykeyspaceeventsOption(state);
     rewriteConfigNumericalOption(state,"hash-max-ziplist-entries",server.hash_max_ziplist_entries,OBJ_HASH_MAX_ZIPLIST_ENTRIES);
     rewriteConfigNumericalOption(state,"hash-max-ziplist-value",server.hash_max_ziplist_value,OBJ_HASH_MAX_ZIPLIST_VALUE);
     rewriteConfigNumericalOption(state,"list-max-ziplist-size",server.list_max_ziplist_size,OBJ_LIST_MAX_ZIPLIST_SIZE);
@@ -1410,7 +1318,6 @@ int rewriteConfig(char *path) {
     rewriteConfigNumericalOption(state,"zset-max-ziplist-value",server.zset_max_ziplist_value,OBJ_ZSET_MAX_ZIPLIST_VALUE);
     rewriteConfigNumericalOption(state,"hll-sparse-max-bytes",server.hll_sparse_max_bytes,CONFIG_DEFAULT_HLL_SPARSE_MAX_BYTES);
     rewriteConfigYesNoOption(state,"activerehashing",server.activerehashing,CONFIG_DEFAULT_ACTIVE_REHASHING);
-    rewriteConfigYesNoOption(state,"protected-mode",server.protected_mode,CONFIG_DEFAULT_PROTECTED_MODE);
     rewriteConfigClientoutputbufferlimitOption(state);
     rewriteConfigNumericalOption(state,"hz",server.hz,CONFIG_DEFAULT_HZ);
 

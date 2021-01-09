@@ -45,6 +45,7 @@
 #include <syslog.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stddef.h>
 
 typedef long long mstime_t; /* millisecond time type. */
 
@@ -58,6 +59,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #include "intset.h"  /* Compact integer set structure */
 #include "util.h"    /* Misc functions useful in many places */
 #include "quicklist.h"
+
+#define REDIS_VERSION "3.2.13"
 
 /* Error codes */
 #define C_OK                    0
@@ -231,7 +234,6 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */
 #define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
 #define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */
-#define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */
 #define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
 
 /* Client block type (btype field in client structure)
@@ -329,7 +331,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CMD_CALL_NONE 0
 #define CMD_CALL_SLOWLOG (1<<0)
 #define CMD_CALL_STATS (1<<1)
-#define CMD_CALL_FULL (CMD_CALL_SLOWLOG | CMD_CALL_STATS | CMD_CALL_PROPAGATE)
+#define CMD_CALL_FULL (CMD_CALL_SLOWLOG | CMD_CALL_STATS)
 
 /* Command propagation flags, see propagate() function */
 #define PROPAGATE_NONE 0
@@ -699,6 +701,9 @@ struct redisServer {
     size_t zset_max_ziplist_entries;
     size_t zset_max_ziplist_value;
     size_t hll_sparse_max_bytes;
+    /* List parameters */
+    int list_max_ziplist_size;
+    int list_compress_depth;
     /* time cache */
     time_t unixtime;        /* Unix time sampled every cron cycle. */
     long long mstime;       /* Like 'unixtime' but with milliseconds resolution. */
@@ -813,7 +818,6 @@ long long ustime(void);
 long long mstime(void);
 void exitFromChild(int retcode);
 size_t redisPopcount(void *s, long count);
-void redisSetProcTitle(char *title);
 
 /* networking.c -- Networking and Client related operations */
 client *createClient(int fd);
@@ -835,6 +839,7 @@ void addReplyBulkCBuffer(client *c, const void *p, size_t len);
 void addReplyBulkLongLong(client *c, long long ll);
 void addReply(client *c, robj *obj);
 void addReplySds(client *c, sds s);
+void addReplyBulkSds(client *c, sds s);
 void addReplyError(client *c, const char *err);
 void addReplyStatus(client *c, const char *status);
 void addReplyDouble(client *c, double d);
@@ -971,9 +976,6 @@ struct redisCommand *lookupCommand(sds name);
 struct redisCommand *lookupCommandByCString(char *s);
 struct redisCommand *lookupCommandOrOriginal(sds name);
 void call(client *c, int flags);
-void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc, int flags);
-void alsoPropagate(struct redisCommand *cmd, int dbid, robj **argv, int argc, int target);
-void forceCommandPropagation(client *c, int flags);
 int prepareForShutdown();
 #ifdef __GNUC__
 void serverLog(int level, const char *fmt, ...)
@@ -1186,6 +1188,7 @@ void hgetCommand(client *c);
 void hmsetCommand(client *c);
 void hmgetCommand(client *c);
 void hdelCommand(client *c);
+void hlenCommand(client *c);
 void hstrlenCommand(client *c);
 void zremrangebyrankCommand(client *c);
 void zunionstoreCommand(client *c);
@@ -1199,8 +1202,7 @@ void hscanCommand(client *c);
 void configCommand(client *c);
 void hincrbyCommand(client *c);
 void hincrbyfloatCommand(client *c);
-
-void restoreCommand(client *c);
+void objectCommand(client *c);
 void clientCommand(client *c);
 void timeCommand(client *c);
 
@@ -1212,7 +1214,6 @@ void *realloc(void *ptr, size_t size) __attribute__ ((deprecated));
 #endif
 
 /* Debugging stuff */
-void sigsegvHandler(int sig, siginfo_t *info, void *secret);
 sds genRedisInfoString(char *section);
 
 #define redisDebug(fmt, ...) \

@@ -196,6 +196,7 @@ struct redisCommand redisCommandTable[] = {
     {"hincrbyfloat",hincrbyfloatCommand,4,"wmF",0,NULL,1,1,1,0,0},
     {"hdel",hdelCommand,-3,"wF",0,NULL,1,1,1,0,0},
     {"hlen",hlenCommand,2,"rF",0,NULL,1,1,1,0,0},
+    {"hstrlen",hstrlenCommand,3,"rF",0,NULL,1,1,1,0,0},
     {"hkeys",hkeysCommand,2,"rS",0,NULL,1,1,1,0,0},
     {"hvals",hvalsCommand,2,"rS",0,NULL,1,1,1,0,0},
     {"hgetall",hgetallCommand,2,"r",0,NULL,1,1,1,0,0},
@@ -272,8 +273,6 @@ void serverLogRaw(int level, const char *msg) {
         snprintf(buf+off,sizeof(buf)-off,"%03d",(int)tv.tv_usec/1000);
         if (pid != server.pid) {
             role_char = 'C'; /* RDB / AOF writing child. */
-        } else {
-            role_char = (server.masterhost ? 'S':'M'); /* Slave or Master. */
         }
         fprintf(fp,"%d:%c %s %c %s\n",
             (int)getpid(),role_char, buf,c[level],msg);
@@ -1036,9 +1035,8 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* Show information about connected clients */
         run_with_period(5000) {
             serverLog(LL_VERBOSE,
-                "%lu clients connected (%lu slaves), %zu bytes in use",
-                listLength(server.clients)-listLength(server.slaves),
-                listLength(server.slaves),
+                "%lu clients connected, %zu bytes in use",
+                listLength(server.clients),
                 zmalloc_used_memory());
         }
 
@@ -1154,7 +1152,6 @@ void createSharedObjects(void) {
 void initServerConfig(void) {
     int j;
 
-    getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);
     server.configfile = NULL;
     server.executable = NULL;
     server.hz = CONFIG_DEFAULT_HZ;
@@ -1167,14 +1164,12 @@ void initServerConfig(void) {
     server.unixsocketperm = CONFIG_DEFAULT_UNIX_SOCKET_PERM;
     server.ipfd_count = 0;
     server.sofd = -1;
-    server.dbnum = REDIS_DEFAULT_DBNUM;
-    server.verbosity = REDIS_DEFAULT_VERBOSITY;
-    WIN32_ONLY(setLogVerbosityLevel(server.verbosity);)
-    server.maxidletime = REDIS_MAXIDLETIME;
-    server.tcpkeepalive = REDIS_DEFAULT_TCP_KEEPALIVE;
+    server.dbnum = CONFIG_DEFAULT_DBNUM;
+    server.verbosity = CONFIG_DEFAULT_VERBOSITY;
+    server.maxidletime = CONFIG_DEFAULT_CLIENT_TIMEOUT;
+    server.tcpkeepalive = CONFIG_DEFAULT_TCP_KEEPALIVE;
     server.active_expire_enabled = 1;
     server.client_max_querybuf_len = PROTO_MAX_QUERYBUF_LEN;
-    server.saveparams = NULL;
     server.loading = 0;
     server.logfile = zstrdup(CONFIG_DEFAULT_LOGFILE);
     server.syslog_enabled = CONFIG_DEFAULT_SYSLOG_ENABLED;
@@ -1495,7 +1490,6 @@ void resetServerStats(void) {
     }
     server.stat_net_input_bytes = 0;
     server.stat_net_output_bytes = 0;
-    server.aof_delayed_fsync = 0;
 }
 
 void initServer(void) {
@@ -1560,7 +1554,6 @@ void initServer(void) {
     }
     server.cronloops = 0;
 
-    server.dirty = 0;
     resetServerStats();
     /* A few stats we don't want to reset: server startup time, and peak mem. */
     server.stat_starttime = time(NULL);
@@ -1615,7 +1608,6 @@ void populateCommandTable(void) {
             case 'r': c->flags |= CMD_READONLY; break;
             case 'm': c->flags |= CMD_DENYOOM; break;
             case 'a': c->flags |= CMD_ADMIN; break;
-            case 'p': c->flags |= CMD_PUBSUB; break;
             case 's': c->flags |= CMD_NOSCRIPT; break;
             case 'R': c->flags |= CMD_RANDOM; break;
             case 'S': c->flags |= CMD_SORT_FOR_SCRIPT; break;
@@ -1624,7 +1616,7 @@ void populateCommandTable(void) {
             case 'M': c->flags |= CMD_SKIP_MONITOR; break;
             case 'k': c->flags |= CMD_ASKING; break;
             case 'F': c->flags |= CMD_FAST; break;
-            default: serverPanic("Unsupported command flag"); break;
+            default: printf("Unsupported command flag"); break;
             }
             f++;
         }
@@ -1714,73 +1706,6 @@ struct redisCommand *lookupCommandOrOriginal(sds name) {
     return cmd;
 }
 
-/* Propagate the specified command (in the context of the specified database id)
- * to AOF and Slaves.
- *
- * flags are an xor between:
- * + PROPAGATE_NONE (no propagation of command at all)
- * + PROPAGATE_AOF (propagate into the AOF file if is enabled)
- * + PROPAGATE_REPL (propagate into the replication link)
- *
- * This should not be used inside commands implementation. Use instead
- * alsoPropagate(), preventCommandPropagation(), forceCommandPropagation().
- */
-void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
-               int flags)
-{
-}
-
-/* Used inside commands to schedule the propagation of additional commands
- * after the current command is propagated to AOF / Replication.
- *
- * 'cmd' must be a pointer to the Redis command to replicate, dbid is the
- * database ID the command should be propagated into.
- * Arguments of the command to propagte are passed as an array of redis
- * objects pointers of len 'argc', using the 'argv' vector.
- *
- * The function does not take a reference to the passed 'argv' vector,
- * so it is up to the caller to release the passed argv (but it is usually
- * stack allocated).  The function autoamtically increments ref count of
- * passed objects, so the caller does not need to. */
-void alsoPropagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
-                   int target)
-{
-    robj **argvcopy;
-    int j;
-
-    if (server.loading) return; /* No propagation during loading. */
-
-    argvcopy = zmalloc(sizeof(robj*)*argc);
-    for (j = 0; j < argc; j++) {
-        argvcopy[j] = argv[j];
-        incrRefCount(argv[j]);
-    }
-    redisOpArrayAppend(&server.also_propagate,cmd,dbid,argvcopy,argc,target);
-}
-
-/* It is possible to call the function forceCommandPropagation() inside a
- * Redis command implementation in order to to force the propagation of a
- * specific command execution into AOF / Replication. */
-void forceCommandPropagation(client *c, int flags) {
-}
-
-/* Avoid that the executed command is propagated at all. This way we
- * are free to just propagate what we want using the alsoPropagate()
- * API. */
-void preventCommandPropagation(client *c) {
-    c->flags |= CLIENT_PREVENT_PROP;
-}
-
-/* AOF specific version of preventCommandPropagation(). */
-void preventCommandAOF(client *c) {
-    c->flags |= CLIENT_PREVENT_AOF_PROP;
-}
-
-/* Replication specific version of preventCommandPropagation(). */
-void preventCommandReplication(client *c) {
-    c->flags |= CLIENT_PREVENT_REPL_PROP;
-}
-
 /* Call() is the core of Redis execution of a command.
  *
  * The following flags can be passed:
@@ -1824,31 +1749,17 @@ void call(client *c, int flags) {
 
     /* Initialization: clear the flags that must be set by the command on
      * demand, and initialize the array for additional commands propagation. */
-    c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
-    redisOpArrayInit(&server.also_propagate);
 
     /* Call the command. */
-    dirty = server.dirty;
     start = ustime();
     c->cmd->proc(c);
     duration = ustime()-start;
-    dirty = server.dirty-dirty;
-    if (dirty < 0) dirty = 0;
+    dirty = 0;
     /* Log the command into the Slow log if needed, and populate the
      * per-command statistics that we show in INFO commandstats. */
     if (flags & CMD_CALL_STATS) {
         c->lastcmd->microseconds += duration;
         c->lastcmd->calls++;
-    }
-
-    /* Propagate the command into the AOF and replication link */
-    if (flags & CMD_CALL_PROPAGATE)
-    {
-        int propagate_flags = PROPAGATE_NONE;
-        /* Call propagate() only if at least one of AOF / replication
-         * propagation is needed. */
-        if (propagate_flags != PROPAGATE_NONE)
-            propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
 
     /* Restore the old replication flags, since call() can be executed
@@ -1879,13 +1790,11 @@ int processCommand(client *c) {
      * such as wrong arity, bad command name and so forth. */
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
     if (!c->cmd) {
-        flagTransaction(c);
         addReplyErrorFormat(c,"unknown command '%s'",
             (char*)c->argv[0]->ptr);
         return C_OK;
     } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
                (c->argc < -c->cmd->arity)) {
-        flagTransaction(c);
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
         return C_OK;
@@ -1894,7 +1803,6 @@ int processCommand(client *c) {
     /* Check if the user is authenticated */
     if (server.requirepass && !c->authenticated && c->cmd->proc != authCommand)
     {
-        flagTransaction(c);
         addReply(c,shared.noautherr);
         return C_OK;
     }
@@ -1909,7 +1817,6 @@ int processCommand(client *c) {
         /* It was impossible to free enough memory, and the command the client
          * is trying to execute is denied during OOM conditions? Error. */
         if ((c->cmd->flags & CMD_DENYOOM) && retval == C_ERR) {
-            flagTransaction(c);
             addReply(c, shared.oomerr);
             return C_OK;
         }
@@ -1923,12 +1830,10 @@ int processCommand(client *c) {
     }
 
     /* Exec the command */
-    if (c->flags & CLIENT_MULTI)
-    {
+    if (c->flags & CLIENT_MULTI) {
         addReply(c,shared.queued);
     } else {
         call(c,CMD_CALL_FULL);
-        c->woff = server.master_repl_offset;
         if (listLength(server.ready_keys))
             handleClientsBlockedOnLists();
     }
@@ -1963,8 +1868,7 @@ int prepareForShutdown(int flags) {
 
     /* Close the listening sockets. Apparently this allows faster restarts. */
     closeListeningSockets(1);
-    serverLog(LL_WARNING,"%s is now ready to exit, bye bye...",
-        server.sentinel_mode ? "Sentinel" : "Redis");
+    serverLog(LL_WARNING,"%s is now ready to exit, bye bye...", "Redis");
     return C_OK;
 }
 
@@ -2270,7 +2174,6 @@ sds genRedisInfoString(char *section) {
         size_t zmalloc_used = zmalloc_used_memory();
         size_t total_system_mem = server.system_memory_size;
         const char *evict_policy = evictPolicyToString();
-        long long memory_lua = (long long)lua_gc(server.lua,LUA_GCCOUNT,0)*1024;
 
         /* Peak memory is updated from time to time by serverCron() so it
          * may happen that the instantaneous value is slightly bigger than
@@ -2373,7 +2276,7 @@ sds genRedisInfoString(char *section) {
             "evicted_keys:%lld\r\n"
             "keyspace_hits:%lld\r\n"
             "keyspace_misses:%lld\r\n"
-            "latest_fork_usec:%lld\r\n"
+            "latest_fork_usec:%lld\r\n",
             server.stat_numconnections,
             server.stat_numcommands,
             getInstantaneousMetric(STATS_METRIC_COMMAND),
@@ -2729,9 +2632,6 @@ void linuxMemoryWarnings(void) {
     if (linuxOvercommitMemoryValue() == 0) {
         serverLog(LL_WARNING,"WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.");
     }
-    if (THPIsEnabled()) {
-        serverLog(LL_WARNING,"WARNING you have Transparent Huge Pages (THP) support enabled in your kernel. This will create latency and memory usage issues with Redis. To fix this issue run the command 'echo never > /sys/kernel/mm/transparent_hugepage/enabled' as root, and add it to your /etc/rc.local in order to retain the setting after a reboot. Redis must be restarted after THP is disabled.");
-    }
 }
 #endif /* __linux__ */
 
@@ -2762,11 +2662,10 @@ void daemonize(void) {
 }
 
 void version(void) {
-    printf("Redis server v=%s malloc=%s bits=%d build=%llx\n",
+    printf("Redis server v=%s malloc=%s bits=%d\n",
         REDIS_VERSION,
         ZMALLOC_LIB,
-        sizeof(long) == 4 ? 32 : 64,
-        (unsigned long long) redisBuildId());
+        sizeof(long) == 4 ? 32 : 64);
     exit(0);
 }
 
@@ -2859,7 +2758,6 @@ void setupSignalHandlers(void) {
 #ifdef HAVE_BACKTRACE
     sigemptyset(&act.sa_mask);
     act.sa_flags = SA_NODEFER | SA_RESETHAND | SA_SIGINFO;
-    act.sa_sigaction = sigsegvHandler;
     sigaction(SIGSEGV, &act, NULL);
     sigaction(SIGBUS, &act, NULL);
     sigaction(SIGFPE, &act, NULL);
@@ -2872,20 +2770,6 @@ void redisOutOfMemoryHandler(size_t allocation_size) {
     serverLog(LL_WARNING,"Out Of Memory allocating %zu bytes!",
         allocation_size);
     printf("Redis aborting for OUT OF MEMORY");
-}
-
-void redisSetProcTitle(char *title) {
-#ifdef USE_SETPROCTITLE
-    char *server_mode = "";
-
-    setproctitle("%s %s:%d%s",
-        title,
-        server.bindaddr_count ? server.bindaddr[0] : "*",
-        server.port,
-        server_mode);
-#else
-    UNUSED(title);
-#endif
 }
 
 /*
@@ -2988,10 +2872,6 @@ int main(int argc, char **argv) {
     struct timeval tv;
     int j;
 
-    /* We need to initialize our libraries, and the server configuration. */
-#ifdef INIT_SETPROCTITLE_REPLACEMENT
-    spt_init(argc, argv);
-#endif
     setlocale(LC_COLLATE,"");
     zmalloc_enable_thread_safeness();
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
@@ -3043,7 +2923,7 @@ int main(int argc, char **argv) {
         loadServerConfig(configfile,options);
         sdsfree(options);
     } else {
-        serverLog(LL_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf", argv[0], server.sentinel_mode ? "sentinel" : "redis");
+        serverLog(LL_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf", argv[0], "redis");
     }
 
     server.supervised = redisIsSupervised(server.supervised_mode);
@@ -3052,7 +2932,6 @@ int main(int argc, char **argv) {
 
     initServer();
     if (background || server.pidfile) createPidFile();
-    redisSetProcTitle(argv[0]);
     redisAsciiArt();
     checkTcpBacklogSettings();
 

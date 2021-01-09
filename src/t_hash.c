@@ -132,7 +132,7 @@ robj *hashTypeGetObject(robj *o, robj *field) {
             value = aux;
         }
     } else {
-        serverPanic("Unknown hash encoding");
+        printf("Unknown hash encoding");
     }
     return value;
 }
@@ -356,7 +356,7 @@ void hashTypeCurrentFromZiplist(hashTypeIterator *hi, int what,
 {
     int ret;
 
-    if (what & REDIS_HASH_KEY) {
+    if (what & OBJ_HASH_KEY) {
         ret = ziplistGet(hi->fptr, vstr, vlen, vll);
     } else {
         ret = ziplistGet(hi->vptr, vstr, vlen, vll);
@@ -472,7 +472,6 @@ void hsetCommand(client *c) {
     update = hashTypeSet(o,c->argv[2],c->argv[3]);
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
 }
 
 void hsetnxCommand(client *c) {
@@ -487,7 +486,6 @@ void hsetnxCommand(client *c) {
         hashTypeSet(o,c->argv[2],c->argv[3]);
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
-        server.dirty++;
     }
 }
 
@@ -508,7 +506,6 @@ void hmsetCommand(client *c) {
     }
     addReply(c, shared.ok);
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
 }
 
 void hincrbyCommand(client *c) {
@@ -541,7 +538,6 @@ void hincrbyCommand(client *c) {
     decrRefCount(new);
     addReplyLongLong(c,value);
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
 }
 
 void hincrbyfloatCommand(client *c) {
@@ -567,7 +563,6 @@ void hincrbyfloatCommand(client *c) {
     hashTypeSet(o,c->argv[2],new);
     addReplyBulk(c,new);
     signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
 
     /* Always replicate HINCRBYFLOAT as an HSET command with the final value
      * in order to make sure that differences in float pricision or formatting
@@ -664,7 +659,6 @@ void hdelCommand(client *c) {
     }
     if (deleted) {
         signalModifiedKey(c->db,c->argv[1]);
-        server.dirty += deleted;
     }
     addReplyLongLong(c,deleted);
 }

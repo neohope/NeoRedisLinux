@@ -297,7 +297,7 @@ void sortCommand(client *c) {
     case OBJ_LIST: vectorlen = listTypeLength(sortval); break;
     case OBJ_SET: vectorlen =  setTypeSize(sortval); break;
     case OBJ_ZSET: vectorlen = dictSize(((zset*)sortval->ptr)->dict); break;
-    default: vectorlen = 0; serverPanic("Bad SORT type"); /* Avoid GCC warning */
+    default: vectorlen = 0; printf("Bad SORT type"); /* Avoid GCC warning */
     }
 
     /* Perform LIMIT start,count sanity checking. */
@@ -546,10 +546,8 @@ void sortCommand(client *c) {
         }
         if (outputlen) {
             setKey(c->db,storekey,sobj);
-            server.dirty += outputlen;
         } else if (dbDelete(c->db,storekey)) {
             signalModifiedKey(c->db,storekey);
-            server.dirty++;
         }
         decrRefCount(sobj);
         addReplyLongLong(c,outputlen);
