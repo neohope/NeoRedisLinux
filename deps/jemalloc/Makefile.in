@@ -221,6 +221,7 @@ clean:
 	rm -f $(C_JET_OBJS:%.$(O)=%.gcno)
 	rm -f $(DSOS) $(STATIC_LIBS)
 	rm -f $(objroot)*.gcov.*
+	rm -f *.log
 
 distclean: clean
 	rm -f $(objroot)bin/jemalloc-config
